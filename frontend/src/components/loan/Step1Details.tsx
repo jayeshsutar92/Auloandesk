@@ -322,7 +322,14 @@ export const Step1Details: React.FC<Step1DetailsProps> = ({
           className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/25 hover:from-amber-400 hover:to-yellow-300 active:scale-[0.99] transition-all flex items-center gap-2"
         >
           <span>Calculate Quotes</span>
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            className="w-4 h-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+          >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
           </svg>
         </button>

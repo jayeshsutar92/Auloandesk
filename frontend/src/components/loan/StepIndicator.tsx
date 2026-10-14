@@ -18,7 +18,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, onSte
     <div className="w-full max-w-3xl mx-auto mb-8 px-2">
       <div className="grid grid-cols-3 relative">
         {/* Connecting track line */}
-        <div className="absolute top-5 left-1/6 right-1/6 h-0.5 bg-slate-800 -z-0">
+        <div className="absolute top-5 left-[16%] right-[16%] h-0.5 bg-slate-800 -z-0">
           <div
             className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 transition-all duration-300"
             style={{
@@ -44,7 +44,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, onSte
               }`}
             >
               <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-md ${
+                className={`w-10 h-10 min-w-10 min-h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-md ${
                   isDone
                     ? "bg-amber-500 text-slate-950 ring-4 ring-amber-500/20 group-hover:bg-amber-400 group-hover:scale-105"
                     : isCurrent
@@ -53,7 +53,14 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep, onSte
                 }`}
               >
                 {isDone ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    className="w-5 h-5 shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                  >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                   </svg>
                 ) : (

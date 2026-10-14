@@ -94,8 +94,15 @@ export const Step3Confirmation: React.FC<Step3ConfirmationProps> = ({
 
         <div className="text-center max-w-lg mx-auto">
           {/* Animated checkmark circle */}
-          <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/20">
-            <svg className="w-8 h-8 stroke-[2.5]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="w-16 h-16 min-w-16 min-h-16 shrink-0 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/20">
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              className="w-8 h-8 shrink-0 stroke-[2.5]"
+              fill="none"
+              stroke="currentColor"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>
@@ -173,7 +180,14 @@ export const Step3Confirmation: React.FC<Step3ConfirmationProps> = ({
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/25 hover:from-amber-400 hover:to-yellow-300 transition-all flex items-center justify-center gap-2"
             >
               <span>View in Admin Dashboard</span>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                className="w-4 h-4 shrink-0"
+                fill="none"
+                stroke="currentColor"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
               </svg>
             </button>
@@ -356,7 +370,14 @@ export const Step3Confirmation: React.FC<Step3ConfirmationProps> = ({
           disabled={submitting}
           className="px-5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 font-semibold text-sm hover:bg-slate-700 hover:text-white transition-all flex items-center gap-2 disabled:opacity-50"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            className="w-4 h-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+          >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
           <span>Modify Quotes</span>
@@ -369,7 +390,14 @@ export const Step3Confirmation: React.FC<Step3ConfirmationProps> = ({
         >
           {submitting ? (
             <>
-              <svg className="w-4 h-4 animate-spin text-slate-950" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                className="w-4 h-4 shrink-0 animate-spin text-slate-950"
+                fill="none"
+                stroke="currentColor"
+              >
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
@@ -378,7 +406,14 @@ export const Step3Confirmation: React.FC<Step3ConfirmationProps> = ({
           ) : (
             <>
               <span>Confirm & Submit Application</span>
-              <svg className="w-4 h-4 stroke-[2.2]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                className="w-4 h-4 shrink-0 stroke-[2.2]"
+                fill="none"
+                stroke="currentColor"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </>

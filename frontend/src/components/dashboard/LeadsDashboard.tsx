@@ -131,10 +131,12 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({ onNewApplication
             title="Refresh application records"
           >
             <svg
-              className={`w-3.5 h-3.5 ${loading ? "animate-spin text-amber-400" : ""}`}
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              className={`w-3.5 h-3.5 shrink-0 ${loading ? "animate-spin text-amber-400" : ""}`}
               fill="none"
               stroke="currentColor"
-              viewBox="0 0 24 24"
             >
               <path
                 strokeLinecap="round"
@@ -151,7 +153,14 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({ onNewApplication
             onClick={onNewApplication}
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-yellow-300 transition-all flex items-center gap-1.5"
           >
-            <svg className="w-4 h-4 stroke-[2.5]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              className="w-4 h-4 shrink-0 stroke-[2.5]"
+              fill="none"
+              stroke="currentColor"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
             <span>New Lead</span>
@@ -208,7 +217,14 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({ onNewApplication
       <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
         <div className="relative flex-1">
           <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              className="w-4 h-4 shrink-0"
+              fill="none"
+              stroke="currentColor"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -251,10 +267,12 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({ onNewApplication
         {loading && leads.length === 0 ? (
           <div className="p-12 text-center space-y-3">
             <svg
-              className="w-8 h-8 animate-spin text-amber-400 mx-auto"
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              className="w-8 h-8 shrink-0 animate-spin text-amber-400 mx-auto"
               fill="none"
               stroke="currentColor"
-              viewBox="0 0 24 24"
             >
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -264,7 +282,14 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({ onNewApplication
         ) : filteredLeads.length === 0 ? (
           <div className="p-16 text-center">
             <div className="w-12 h-12 rounded-full bg-slate-800/80 text-slate-400 flex items-center justify-center mx-auto mb-3">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                className="w-6 h-6 shrink-0"
+                fill="none"
+                stroke="currentColor"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </div>

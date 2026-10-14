@@ -120,10 +120,12 @@ export const Step2Quotes: React.FC<Step2QuotesProps> = ({
             className="self-start md:self-auto px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs font-medium border border-slate-700/60 transition-all flex items-center gap-1.5 disabled:opacity-50"
           >
             <svg
-              className={`w-3.5 h-3.5 ${loading ? "animate-spin text-amber-400" : ""}`}
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              className={`w-3.5 h-3.5 shrink-0 ${loading ? "animate-spin text-amber-400" : ""}`}
               fill="none"
               stroke="currentColor"
-              viewBox="0 0 24 24"
             >
               <path
                 strokeLinecap="round"
@@ -252,7 +254,14 @@ export const Step2Quotes: React.FC<Step2QuotesProps> = ({
                     }`}
                   >
                     {isSelected && (
-                      <svg className="w-3.5 h-3.5 stroke-[3]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        className="w-3.5 h-3.5 shrink-0 stroke-[3]"
+                        fill="none"
+                        stroke="currentColor"
+                      >
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
                     )}
@@ -361,7 +370,14 @@ export const Step2Quotes: React.FC<Step2QuotesProps> = ({
           onClick={onBack}
           className="px-5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 font-semibold text-sm hover:bg-slate-700 hover:text-white transition-all flex items-center gap-2"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            className="w-4 h-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+          >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
           <span>Back to Details</span>
@@ -374,7 +390,14 @@ export const Step2Quotes: React.FC<Step2QuotesProps> = ({
           className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/25 hover:from-amber-400 hover:to-yellow-300 active:scale-[0.99] transition-all flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
         >
           <span>Review Application</span>
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            className="w-4 h-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+          >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
           </svg>
         </button>

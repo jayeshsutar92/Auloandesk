@@ -123,7 +123,7 @@ export const AiAssistantChat: React.FC = () => {
         >
           {isOpen ? (
             <>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 shrink-0" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
               </svg>
               <span>Close Assistant</span>
@@ -132,7 +132,7 @@ export const AiAssistantChat: React.FC = () => {
             <>
               <div className="relative">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 block absolute -top-0.5 -right-0.5 ring-2 ring-slate-950 animate-pulse" />
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5 shrink-0" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -300,7 +300,7 @@ export const AiAssistantChat: React.FC = () => {
             {/* Loading Indicator */}
             {loading && (
               <div className="flex items-center gap-2 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-slate-400 max-w-[70%]">
-                <svg className="w-4 h-4 animate-spin text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 shrink-0 animate-spin text-amber-400" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
@@ -369,9 +369,9 @@ export const AiAssistantChat: React.FC = () => {
             <button
               type="submit"
               disabled={!input.trim() || loading}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 hover:from-amber-400 hover:to-yellow-300 transition-all disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center"
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 hover:from-amber-400 hover:to-yellow-300 transition-all disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center cursor-pointer"
             >
-              <svg className="w-4 h-4 stroke-[2.2]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 shrink-0 stroke-[2.2]" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
               </svg>
             </button>
