@@ -4,6 +4,34 @@ import { app } from "../src/app.js";
 import { prisma } from "../src/config/db.js";
 import { resetGoldRateCache } from "../src/services/gold-rate.service.js";
 
+interface HardenedPrismaClient {
+  applicationStatusAudit: {
+    deleteMany: (args?: { where?: { applicationId?: { in?: string[] } } }) => Promise<unknown>;
+    findMany: (args?: {
+      where?: { applicationId?: string };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    }) => Promise<
+      Array<{
+        id: string;
+        applicationId: string;
+        previousStatus: string;
+        newStatus: string;
+        actor: string;
+        notes: string | null;
+        createdAt: Date;
+      }>
+    >;
+  };
+  idempotencyRecord: {
+    deleteMany: (args?: { where?: { key?: { startsWith?: string } } }) => Promise<unknown>;
+    findUnique: (args?: { where?: { key?: string } }) => Promise<{
+      responseStatus: number;
+    } | null>;
+  };
+}
+
+const db = prisma as unknown as typeof prisma & HardenedPrismaClient;
+
 describe("B1: Backend Hardening Integration Tests", () => {
   let schemeId = "";
   const TEST_PREFIX = "989911";
@@ -27,7 +55,7 @@ describe("B1: Backend Hardening Integration Tests", () => {
 
     const testAppIds = testApps.map((a) => a.id);
     if (testAppIds.length > 0) {
-      await prisma.applicationStatusAudit.deleteMany({
+      await db.applicationStatusAudit.deleteMany({
         where: {
           applicationId: { in: testAppIds }
         }
@@ -40,7 +68,7 @@ describe("B1: Backend Hardening Integration Tests", () => {
     }
 
     // Delete test idempotency records
-    await prisma.idempotencyRecord.deleteMany({
+    await db.idempotencyRecord.deleteMany({
       where: {
         key: {
           startsWith: "test-"
@@ -96,7 +124,7 @@ describe("B1: Backend Hardening Integration Tests", () => {
       expect(res.body.data.fullName).toBe("Vikram Rathore");
 
       // Verify stored in DB
-      const dbRecord = await prisma.idempotencyRecord.findUnique({
+      const dbRecord = await db.idempotencyRecord.findUnique({
         where: { key }
       });
       expect(dbRecord).toBeDefined();
@@ -434,7 +462,7 @@ describe("B1: Backend Hardening Integration Tests", () => {
       expect(audit2.notes).toBe("Final approval granted");
 
       // Verify in DB directly
-      const dbAudits = await prisma.applicationStatusAudit.findMany({
+      const dbAudits = await db.applicationStatusAudit.findMany({
         where: { applicationId: auditLeadId },
         orderBy: { createdAt: "asc" }
       });
