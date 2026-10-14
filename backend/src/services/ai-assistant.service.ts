@@ -29,11 +29,26 @@ CRITICAL OPERATIONAL RULES & GUARDRAILS:
      * Gross Weight & Net Gold Weight
      * Karat (18K, 22K, or 24K)
      * Selected Scheme Name & Interest Rate
+     * Tenure in Months
      * Sanctioned / Eligible Loan Amount
+   - You must format this summary using an \`\`\`application-summary JSON block:
+     \`\`\`application-summary
+     {
+       "fullName": "Full Legal Name",
+       "maskedMobileNumber": "9876XXXX10",
+       "grossWeightGrams": 50,
+       "netWeightGrams": 45,
+       "karat": 22,
+       "schemeName": "Bullet Repayment",
+       "annualInterestRate": 12,
+       "tenureMonths": 12,
+       "eligibleLoan": 202125
+     }
+     \`\`\`
    - After showing the summary, explicitly ask:
      "Do you confirm and authorize this gold loan application? (Yes/No)"
    - ONLY call "submit_application" with "userConfirmed: true" after the user explicitly and affirmatively confirms (e.g., "yes", "confirm", "proceed", "I confirm").
-   - If the user says "no", "wait", or asks to modify details, do NOT submit.
+   - If the user says "no", "cancel", "wait", or asks to modify details, do NOT submit.
 
 4. DUPLICATE APPLICATION HANDLING:
    - If "submit_application" returns a DUPLICATE_APPLICATION error, politely inform the user that an active application already exists for this mobile number within the last 7 days under RBI compliance rules. Provide the existing application ID and advise them that duplicate applications within 7 days cannot be created. Do NOT automatically retry.
@@ -339,9 +354,151 @@ export async function executeTool(
   }
 }
 
+export interface ApplicationSummaryData {
+  fullName: string;
+  maskedMobileNumber: string;
+  grossWeightGrams: number;
+  netWeightGrams: number;
+  karat: number;
+  schemeName: string;
+  annualInterestRate: number;
+  tenureMonths: number;
+  eligibleLoan: number;
+}
+
 export interface AssistantChatResponse {
   message: string;
   toolExecutions: ToolExecutionRecord[];
+  applicationSummary?: ApplicationSummaryData | null;
+}
+
+export function extractApplicationSummary(
+  rawMessage: string,
+  executedTools: ToolExecutionRecord[]
+): { message: string; applicationSummary: ApplicationSummaryData | null } {
+  if (!rawMessage) {
+    return { message: rawMessage, applicationSummary: null };
+  }
+
+  // 1. Check for ```application-summary ... ``` or ```json:application-summary ... ```
+  const jsonBlockRegex = /```(?:application-summary|json:application-summary|json)?\s*(\{[\s\S]*?"fullName"[\s\S]*?"eligibleLoan"[\s\S]*?\})\s*```/i;
+  const match = rawMessage.match(jsonBlockRegex);
+  if (match && match[1]) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (
+        parsed.fullName &&
+        parsed.maskedMobileNumber &&
+        parsed.grossWeightGrams !== undefined &&
+        parsed.netWeightGrams !== undefined &&
+        parsed.karat !== undefined &&
+        parsed.schemeName &&
+        parsed.annualInterestRate !== undefined &&
+        parsed.tenureMonths !== undefined &&
+        parsed.eligibleLoan !== undefined
+      ) {
+        const cleanedMessage = rawMessage
+          .replace(match[0], "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+        return {
+          message: cleanedMessage || "Please review your gold loan application summary below:",
+          applicationSummary: {
+            fullName: String(parsed.fullName).trim(),
+            maskedMobileNumber: String(parsed.maskedMobileNumber).trim(),
+            grossWeightGrams: Number(parsed.grossWeightGrams),
+            netWeightGrams: Number(parsed.netWeightGrams),
+            karat: Number(parsed.karat),
+            schemeName: String(parsed.schemeName).trim(),
+            annualInterestRate: Number(parsed.annualInterestRate),
+            tenureMonths: Number(parsed.tenureMonths),
+            eligibleLoan: Number(parsed.eligibleLoan)
+          }
+        };
+      }
+    } catch {
+      // Fall through to table fallback
+    }
+  }
+
+  // 2. Fallback: Check for markdown table representation
+  const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/;
+  const tableMatch = rawMessage.match(tableRegex);
+  if (tableMatch) {
+    const tableText = tableMatch[0];
+    const lines = tableText.split(/\r?\n/).filter((l) => l.trim().startsWith("|"));
+    const fields: Record<string, string> = {};
+
+    for (const line of lines) {
+      const cells = line
+        .split("|")
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0);
+      if (cells.length >= 2 && cells[0] && cells[1]) {
+        const key = cells[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+        const val = cells[1];
+        if (key && !key.includes("---") && key !== "field" && key !== "parameter") {
+          fields[key] = val;
+        }
+      }
+    }
+
+    const getVal = (...keys: string[]): string | undefined => {
+      for (const k of keys) {
+        if (fields[k]) return fields[k];
+        for (const fKey of Object.keys(fields)) {
+          if (fKey.includes(k)) return fields[fKey];
+        }
+      }
+      return undefined;
+    };
+
+    const name = getVal("fullname", "legalname", "applicantname", "applicant");
+    const mobile = getVal("maskedmobilenumber", "mobilenumber", "maskedmobile", "mobile", "phone");
+    const gross = getVal("grossweight", "grossweightgrams", "gross");
+    const net = getVal("netgoldweight", "netweight", "netweightgrams", "net");
+    const karat = getVal("karat", "goldpurity", "purity");
+    const scheme = getVal("selectedscheme", "schemename", "scheme", "plan");
+    const rate = getVal("annualinterestrate", "interestrate", "rate", "interest");
+    const tenure = getVal("tenuremonths", "tenure", "duration");
+    const loan = getVal("eligibleloanamount", "eligibleloan", "sanctionedloanamount", "loanamount", "sanction");
+
+    if (name && (mobile || loan || scheme)) {
+      const quoteTool = executedTools.find(
+        (t) => t.toolName === "calculate_quote" && (t.result as Record<string, unknown>)?.success
+      );
+      const quoteResult = (quoteTool?.result as { quote?: { schemes: Array<{ name: string; annualInterestRate: number; tenureMonths: number; eligibleLoan: number }> } })?.quote;
+
+      const numGross = parseFloat(gross?.replace(/[^0-9.]/g, "") || "0");
+      const numNet = parseFloat(net?.replace(/[^0-9.]/g, "") || "0");
+      const numKarat = parseInt(karat?.replace(/[^0-9]/g, "") || "22", 10);
+      const numRate = parseFloat(rate?.replace(/[^0-9.]/g, "") || "12");
+      const numTenure = parseInt(tenure?.replace(/[^0-9]/g, "") || "12", 10);
+      const numLoan = parseFloat(loan?.replace(/[^0-9.]/g, "") || "0");
+
+      const cleanedMessage = rawMessage
+        .replace(tableText, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+      return {
+        message: cleanedMessage || "Please review your gold loan application summary below:",
+        applicationSummary: {
+          fullName: name.replace(/[*_]/g, "").trim(),
+          maskedMobileNumber: (mobile || "9876XXXX10").replace(/[*_]/g, "").trim(),
+          grossWeightGrams: numGross || Number(quoteTool?.args?.grossWeightGrams) || 50,
+          netWeightGrams: numNet || Number(quoteTool?.args?.netWeightGrams) || 45,
+          karat: [18, 22, 24].includes(numKarat) ? numKarat : (Number(quoteTool?.args?.karat) || 22),
+          schemeName: scheme ? scheme.replace(/[*_]/g, "").trim() : (quoteResult?.schemes?.[0]?.name || "Bullet Repayment"),
+          annualInterestRate: numRate || quoteResult?.schemes?.[0]?.annualInterestRate || 12,
+          tenureMonths: numTenure || quoteResult?.schemes?.[0]?.tenureMonths || 12,
+          eligibleLoan: numLoan || quoteResult?.schemes?.[0]?.eligibleLoan || 0
+        }
+      };
+    }
+  }
+
+  return { message: rawMessage, applicationSummary: null };
 }
 
 export async function chatWithAssistant(
@@ -441,16 +598,26 @@ export async function chatWithAssistant(
       }
     } else {
       // Model responded with final text
+      const rawText = assistantMsg.content || "I am here to help you with your gold loan. How can I assist you?";
+      const { message: finalMessage, applicationSummary } = extractApplicationSummary(rawText, executedTools);
+
       return {
-        message: assistantMsg.content || "I am here to help you with your gold loan. How can I assist you?",
-        toolExecutions: executedTools
+        message: finalMessage,
+        toolExecutions: executedTools,
+        applicationSummary
       };
     }
   }
 
   // If loop exhausted
+  const { message: finalMessage, applicationSummary } = extractApplicationSummary(
+    "I processed your request, but the operation took too many conversational turns. Please review your details and confirm.",
+    executedTools
+  );
+
   return {
-    message: "I processed your request, but the operation took too many conversational turns. Please review your details and confirm.",
-    toolExecutions: executedTools
+    message: finalMessage,
+    toolExecutions: executedTools,
+    applicationSummary
   };
 }

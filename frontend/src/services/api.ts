@@ -127,9 +127,22 @@ export interface ToolExecutionRecord {
   result: unknown;
 }
 
+export interface ApplicationSummaryData {
+  fullName: string;
+  maskedMobileNumber: string;
+  grossWeightGrams: number;
+  netWeightGrams: number;
+  karat: number;
+  schemeName: string;
+  annualInterestRate: number;
+  tenureMonths: number;
+  eligibleLoan: number;
+}
+
 export interface AssistantChatResponse {
   message: string;
   toolExecutions: ToolExecutionRecord[];
+  applicationSummary?: ApplicationSummaryData | null;
 }
 
 export async function sendAssistantChat(

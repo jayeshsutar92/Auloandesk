@@ -15,7 +15,8 @@ export async function handleAssistantChat(
       success: true,
       data: {
         message: response.message,
-        toolExecutions: response.toolExecutions
+        toolExecutions: response.toolExecutions,
+        applicationSummary: response.applicationSummary || null
       }
     });
   } catch (err) {

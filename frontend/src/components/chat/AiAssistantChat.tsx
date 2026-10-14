@@ -3,12 +3,17 @@ import {
   sendAssistantChat,
   ApiServiceError,
   type ChatMessage,
-  type ToolExecutionRecord
+  type ToolExecutionRecord,
+  type ApplicationSummaryData
 } from "../../services/api.js";
+import { ApplicationConfirmationCard } from "./ApplicationConfirmationCard.js";
+import { MarkdownContent } from "./MarkdownContent.js";
 
 interface DisplayMessage extends ChatMessage {
   id: string;
   toolExecutions?: ToolExecutionRecord[];
+  applicationSummary?: ApplicationSummaryData | null;
+  confirmationStatus?: "pending" | "confirmed" | "cancelled";
 }
 
 const STARTER_PROMPTS = [
@@ -16,6 +21,71 @@ const STARTER_PROMPTS = [
   "Calculate quote for 50g gross and 45g net with 22K gold",
   "How is gold collateral valued?"
 ];
+
+/**
+ * Fallback parser in case message text contains an unparsed markdown table
+ */
+function extractClientApplicationSummary(content: string): ApplicationSummaryData | null {
+  if (!content) return null;
+  const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/;
+  const match = content.match(tableRegex);
+  if (!match) return null;
+
+  const lines = match[0].split(/\r?\n/).filter((l) => l.trim().startsWith("|"));
+  const fields: Record<string, string> = {};
+
+  for (const line of lines) {
+    const cells = line.split("|").map((c) => c.trim()).filter((c) => c.length > 0);
+    if (cells.length >= 2 && cells[0] && cells[1]) {
+      const key = cells[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      const val = cells[1];
+      if (key && !key.includes("---") && key !== "field" && key !== "parameter") {
+        fields[key] = val;
+      }
+    }
+  }
+
+  const getVal = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      if (fields[k]) return fields[k];
+      for (const fKey of Object.keys(fields)) {
+        if (fKey.includes(k)) return fields[fKey];
+      }
+    }
+    return undefined;
+  };
+
+  const name = getVal("fullname", "legalname", "applicantname", "applicant");
+  const mobile = getVal("maskedmobilenumber", "mobilenumber", "maskedmobile", "mobile");
+  const gross = getVal("grossweight", "gross");
+  const net = getVal("netgoldweight", "netweight", "net");
+  const karat = getVal("karat", "goldpurity", "purity");
+  const scheme = getVal("selectedscheme", "schemename", "scheme", "plan");
+  const rate = getVal("annualinterestrate", "interestrate", "rate");
+  const tenure = getVal("tenuremonths", "tenure");
+  const loan = getVal("eligibleloanamount", "eligibleloan", "sanctionedloanamount", "loanamount");
+
+  if (name && (mobile || loan || scheme)) {
+    return {
+      fullName: name.replace(/[*_]/g, "").trim(),
+      maskedMobileNumber: (mobile || "9876XXXX10").replace(/[*_]/g, "").trim(),
+      grossWeightGrams: parseFloat(gross?.replace(/[^0-9.]/g, "") || "0") || 50,
+      netWeightGrams: parseFloat(net?.replace(/[^0-9.]/g, "") || "0") || 45,
+      karat: parseInt(karat?.replace(/[^0-9]/g, "") || "22", 10) || 22,
+      schemeName: scheme ? scheme.replace(/[*_]/g, "").trim() : "Bullet Repayment",
+      annualInterestRate: parseFloat(rate?.replace(/[^0-9.]/g, "") || "12"),
+      tenureMonths: parseInt(tenure?.replace(/[^0-9]/g, "") || "12", 10) || 12,
+      eligibleLoan: parseFloat(loan?.replace(/[^0-9.]/g, "") || "0") || 0
+    };
+  }
+  return null;
+}
+
+function cleanContentText(content: string): string {
+  if (!content) return "";
+  const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/;
+  return content.replace(tableRegex, "").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 export const AiAssistantChat: React.FC = () => {
   const [isOpen, setIsOpen] = React.useState<boolean>(false);
@@ -54,13 +124,32 @@ export const AiAssistantChat: React.FC = () => {
       content: text
     };
 
+    // If user explicitly sent text matching yes/no, update any pending confirmation card
+    const lowerText = text.toLowerCase();
+    if (lowerText.includes("yes") || lowerText.includes("confirm") || lowerText.includes("proceed")) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.confirmationStatus === "pending"
+            ? { ...m, confirmationStatus: "confirmed" }
+            : m
+        )
+      );
+    } else if (lowerText.includes("no") || lowerText.includes("cancel") || lowerText.includes("modify")) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.confirmationStatus === "pending"
+            ? { ...m, confirmationStatus: "cancelled" }
+            : m
+        )
+      );
+    }
+
     const newThread = [...messages, userMessage];
     setMessages(newThread);
     setInput("");
     setLoading(true);
 
     try {
-      // Send history to backend
       const apiMessages: ChatMessage[] = newThread.map((m) => ({
         role: m.role,
         content: m.content
@@ -73,7 +162,9 @@ export const AiAssistantChat: React.FC = () => {
         id: `assistant-${idCounter.current}`,
         role: "assistant",
         content: response.message,
-        toolExecutions: response.toolExecutions
+        toolExecutions: response.toolExecutions,
+        applicationSummary: response.applicationSummary || null,
+        confirmationStatus: response.applicationSummary ? "pending" : undefined
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -94,6 +185,24 @@ export const AiAssistantChat: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleConfirmCard = (messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId ? { ...m, confirmationStatus: "confirmed" } : m
+      )
+    );
+    void handleSend("Yes, I confirm and authorize this gold loan application.");
+  };
+
+  const handleCancelCard = (messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId ? { ...m, confirmationStatus: "cancelled" } : m
+      )
+    );
+    void handleSend("No, please cancel this application. I want to modify details.");
   };
 
   const handleClear = () => {
@@ -149,7 +258,7 @@ export const AiAssistantChat: React.FC = () => {
 
       {/* Slide-over / Floating Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-20 right-4 sm:right-6 z-40 w-[calc(100vw-2rem)] sm:w-[450px] h-[580px] max-h-[80vh] bg-slate-900/95 border border-slate-800 rounded-3xl shadow-2xl backdrop-blur-xl flex flex-col overflow-hidden animate-fadeIn">
+        <div className="fixed bottom-20 right-4 sm:right-6 z-40 w-[calc(100vw-2rem)] sm:w-[480px] h-[620px] max-h-[85vh] bg-slate-900/95 border border-slate-800 rounded-3xl shadow-2xl backdrop-blur-xl flex flex-col overflow-hidden animate-fadeIn">
           {/* Panel Header */}
           <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -174,7 +283,7 @@ export const AiAssistantChat: React.FC = () => {
               <button
                 type="button"
                 onClick={handleClear}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs transition-all"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs transition-all cursor-pointer"
                 title="Reset conversation"
               >
                 Clear
@@ -182,7 +291,7 @@ export const AiAssistantChat: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs transition-all"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs transition-all cursor-pointer"
                 title="Minimize panel"
               >
                 ✕
@@ -194,19 +303,34 @@ export const AiAssistantChat: React.FC = () => {
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
             {messages.map((m) => {
               const isUser = m.role === "user";
+              const summary = m.applicationSummary || (!isUser ? extractClientApplicationSummary(m.content) : null);
+              const displayContent = summary ? cleanContentText(m.content) : m.content;
+
               return (
                 <div
                   key={m.id}
                   className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}
                 >
                   <div
-                    className={`max-w-[85%] rounded-2xl p-3.5 leading-relaxed ${
+                    className={`max-w-[92%] sm:max-w-[88%] rounded-2xl p-3.5 leading-relaxed ${
                       isUser
                         ? "bg-amber-500/15 border border-amber-500/30 text-amber-100 rounded-br-xs"
                         : "bg-slate-950/80 border border-slate-800 text-slate-200 rounded-bl-xs"
                     }`}
                   >
-                    <div className="whitespace-pre-wrap">{m.content}</div>
+                    {/* Conversational Message Content */}
+                    {displayContent && <MarkdownContent content={displayContent} />}
+
+                    {/* Structured Application Confirmation Card Component */}
+                    {summary && (
+                      <ApplicationConfirmationCard
+                        summary={summary}
+                        status={m.confirmationStatus || "pending"}
+                        onConfirm={() => handleConfirmCard(m.id)}
+                        onCancel={() => handleCancelCard(m.id)}
+                        disabled={loading}
+                      />
+                    )}
 
                     {/* Render tool execution results if present */}
                     {m.toolExecutions && m.toolExecutions.length > 0 && (
@@ -325,28 +449,6 @@ export const AiAssistantChat: React.FC = () => {
                   {prompt}
                 </button>
               ))}
-            </div>
-          )}
-
-          {/* Confirmation Quick Actions when confirmation requested */}
-          {messages[messages.length - 1]?.content.includes("Do you confirm") && (
-            <div className="px-3 py-2 bg-slate-950/80 border-t border-slate-800 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleSend("Yes, I confirm")}
-                disabled={loading}
-                className="flex-1 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-emerald-500/20"
-              >
-                ✓ Yes, I Confirm
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSend("No, I want to change details")}
-                disabled={loading}
-                className="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition-all"
-              >
-                ✕ Modify Details
-              </button>
             </div>
           )}
 

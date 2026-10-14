@@ -461,5 +461,47 @@ describe("Phase 5: AI Loan Assistant Services and Tool Calling", () => {
       expect(res.status).toBe(400);
       expect(res.body).toHaveProperty("success", false);
     });
+
+    it("returns structured applicationSummary data in API response when model outputs application summary block", async () => {
+      const summaryJson = JSON.stringify({
+        fullName: "Vikram Malhotra",
+        maskedMobileNumber: "9876XXXX88",
+        grossWeightGrams: 60,
+        netWeightGrams: 55,
+        karat: 22,
+        schemeName: "Monthly EMI",
+        annualInterestRate: 10.5,
+        tenureMonths: 12,
+        eligibleLoan: 264687
+      });
+
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: `Please review your loan application details:\n\`\`\`application-summary\n${summaryJson}\n\`\`\`\nDo you confirm and authorize this gold loan application? (Yes/No)`
+            }
+          }
+        ]
+      });
+
+      const res = await request(app)
+        .post("/api/v1/assistant/chat")
+        .send({
+          messages: [{ role: "user", content: "I want to apply" }]
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.applicationSummary).toBeDefined();
+      expect(res.body.data.applicationSummary.fullName).toBe("Vikram Malhotra");
+      expect(res.body.data.applicationSummary.maskedMobileNumber).toBe("9876XXXX88");
+      expect(res.body.data.applicationSummary.eligibleLoan).toBe(264687);
+      expect(res.body.data.applicationSummary.schemeName).toBe("Monthly EMI");
+      // Verify raw JSON block was stripped from conversational message text
+      expect(res.body.data.message).not.toContain("```application-summary");
+      expect(res.body.data.message).toContain("Do you confirm");
+    });
   });
 });
