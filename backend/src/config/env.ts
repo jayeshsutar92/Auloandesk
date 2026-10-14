@@ -7,7 +7,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   CORS_ORIGIN: z.string().min(1).default("http://localhost:5173"),
-  DATABASE_URL: z.string().optional()
+  DATABASE_URL: z.string().optional(),
+  GROQ_API_KEY: z.string().optional(),
+  GROQ_MODEL: z.string().default("openai/gpt-oss-120b")
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

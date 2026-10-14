@@ -2,12 +2,13 @@ import React from "react";
 import { Header } from "./components/common/Header.js";
 import { LoanApplicationFlow } from "./components/loan/LoanApplicationFlow.js";
 import { LeadsDashboard } from "./components/dashboard/LeadsDashboard.js";
+import { AiAssistantChat } from "./components/chat/AiAssistantChat.js";
 
 export function App() {
   const [activeTab, setActiveTab] = React.useState<"apply" | "dashboard">("apply");
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950 relative">
       {/* Navigation Header */}
       <Header activeTab={activeTab} onTabChange={setActiveTab} />
 
@@ -19,6 +20,9 @@ export function App() {
           <LeadsDashboard onNewApplication={() => setActiveTab("apply")} />
         )}
       </main>
+
+      {/* Floating AI Assistant Chat Panel */}
+      <AiAssistantChat />
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-950/90 py-8 px-4 sm:px-6 mt-12 text-center text-xs text-slate-500">

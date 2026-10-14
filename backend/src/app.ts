@@ -4,6 +4,7 @@ import cors from "cors";
 import { env } from "./config/env.js";
 import healthRouter from "./routes/health.route.js";
 import loanRouter from "./routes/loan.route.js";
+import aiRouter from "./routes/ai.route.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js";
 
 export function createApp(): Express {
@@ -30,6 +31,7 @@ export function createApp(): Express {
 
   // Business API v1 routes
   app.use("/api/v1", loanRouter);
+  app.use("/api/v1", aiRouter);
 
   // 404 handler for unmatched routes
   app.use(notFoundHandler);

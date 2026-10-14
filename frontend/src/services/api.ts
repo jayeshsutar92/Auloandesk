@@ -115,3 +115,34 @@ export async function fetchLeads(filters?: {
   });
   return handleResponse<LeadItem[]>(res);
 }
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface ToolExecutionRecord {
+  toolName: string;
+  args: Record<string, unknown>;
+  result: unknown;
+}
+
+export interface AssistantChatResponse {
+  message: string;
+  toolExecutions: ToolExecutionRecord[];
+}
+
+export async function sendAssistantChat(
+  messages: ChatMessage[]
+): Promise<AssistantChatResponse> {
+  const res = await fetch(`${API_BASE_URL}/assistant/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    },
+    body: JSON.stringify({ messages })
+  });
+  return handleResponse<AssistantChatResponse>(res);
+}
+
