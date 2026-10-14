@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model LoanScheme {
+  id                 String            @id @default(uuid())
+  code               String            @unique
+  name               String
+  description        String?
+  annualInterestRate Decimal           @db.Decimal(5, 2)
+  tenureMonths       Int
+  maxLtv             Decimal           @db.Decimal(5, 4)
+  isActive           Boolean           @default(true)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  applications       LoanApplication[]
+
+  @@map("loan_schemes")
+}
+
+model LoanApplication {
+  id                 String            @id @default(uuid())
+  applicationNumber  String            @unique
+  fullName           String
+  mobileNumber       String
+  maskedMobileNumber String
+  email              String?
+  grossWeightGrams   Decimal           @db.Decimal(8, 2)
+  netWeightGrams     Decimal           @db.Decimal(8, 2)
+  goldKarat          Int
+  rate24kPerGram     Decimal           @db.Decimal(10, 2)
+  pureGoldGrams      Decimal           @db.Decimal(8, 3)
+  goldValue          Decimal           @db.Decimal(12, 2)
+  eligibleLoan       Decimal           @db.Decimal(12, 2)
+  appliedLoanAmount  Decimal?          @db.Decimal(12, 2)
+  status             ApplicationStatus @default(SUBMITTED)
+  schemeId           String
+  scheme             LoanScheme        @relation(fields: [schemeId], references: [id])
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([mobileNumber, createdAt])
+  @@map("loan_applications")
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
