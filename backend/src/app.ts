@@ -3,6 +3,7 @@ import helmet from "helmet";
 import cors from "cors";
 import { env } from "./config/env.js";
 import healthRouter from "./routes/health.route.js";
+import loanRouter from "./routes/loan.route.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js";
 
 export function createApp(): Express {
@@ -23,8 +24,12 @@ export function createApp(): Express {
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Routes
+  // Health route
   app.use(healthRouter);
+  app.use("/api/v1", healthRouter);
+
+  // Business API v1 routes
+  app.use("/api/v1", loanRouter);
 
   // 404 handler for unmatched routes
   app.use(notFoundHandler);

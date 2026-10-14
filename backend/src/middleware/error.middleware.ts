@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { ZodError } from "zod";
 import { env } from "../config/env.js";
 
 export class AppError extends Error {
@@ -10,6 +11,15 @@ export class AppError extends Error {
   ) {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export class DuplicateApplicationError extends AppError {
+  constructor(
+    public readonly existingApplicationId: string,
+    message: string = "An application with this mobile number already exists within the last 7 days."
+  ) {
+    super(409, message, "DUPLICATE_APPLICATION", { existingApplicationId });
   }
 }
 
@@ -29,6 +39,19 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  if (err instanceof DuplicateApplicationError) {
+    res.status(409).json({
+      success: false,
+      error: {
+        code: err.code,
+        message: err.message,
+        existingApplicationId: err.existingApplicationId,
+        details: err.details
+      }
+    });
+    return;
+  }
+
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       success: false,
@@ -36,6 +59,28 @@ export function errorHandler(
         code: err.code,
         message: err.message,
         details: err.details
+      }
+    });
+    return;
+  }
+
+  if (err instanceof ZodError) {
+    const fields: Record<string, string[]> = {};
+    for (const issue of err.issues) {
+      const field = issue.path.join(".") || "body";
+      if (!fields[field]) {
+        fields[field] = [];
+      }
+      fields[field].push(issue.message);
+    }
+
+    res.status(400).json({
+      success: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Input validation failed",
+        fields,
+        details: err.issues
       }
     });
     return;
