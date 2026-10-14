@@ -126,3 +126,19 @@ if (args.userConfirmed !== true) {
 In `backend/test/ai-assistant.test.ts`, the automated test:
 `it("Confirmation Guardrail: submit_application rejects without explicit user confirmation")`
 passes `{ userConfirmed: false }` or omits it. The test asserts that the backend returns `success: false` and `error: "CONFIRMATION_REQUIRED"`. This guarantees that even if an LLM is prompted or jailbroken to submit prematurely, the backend API adamantly refuses to write to the database until explicit user affirmative consent has been recorded.
+
+---
+
+## 5. B1: Backend Hardening & AI Assistant Integration
+
+The backend hardening updates (B1) strengthen the infrastructure underlying the AI Assistant:
+
+1. **Transactional Advisory Lock Protection on AI Ingestion**:
+   When the AI tool `submit_application` calls `createLead()`, the submission runs under PostgreSQL transaction advisory locking (`SELECT pg_advisory_xact_lock(hashtext('lead_mobile:' || mobileNumber))`). If an applicant tries to submit via both the guided form and the chat assistant at the same instant, the database serializes both requests: one succeeds and the other triggers the canonical `DUPLICATE_APPLICATION` error with `existingApplicationId`.
+
+2. **Immutable Audit Trail for AI-Assisted Applications**:
+   Every application created via the assistant is created with initial status `SUBMITTED`. Subsequent lifecycle transitions (e.g. `UNDER_REVIEW`, `APPROVED`, `REJECTED`) executed by credit officers or automated underwriting pipelines are recorded atomically in `application_status_audits` with the acting officer/system, timestamp, and review notes.
+
+3. **Authoritative Gold Benchmark**:
+   Both the AI `calculate_quote` tool and the REST `POST /api/v1/quotes` endpoint derive collateral valuation strictly from `getCurrentRate24k()`, ensuring consistent pricing across direct web application flows and interactive conversational sessions.
+

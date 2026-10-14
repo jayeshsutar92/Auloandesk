@@ -79,10 +79,30 @@ export const createLeadSchema = z
 
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;
 
-// Validation for GET /api/v1/leads query filters
 export const listLeadsQuerySchema = z.object({
   schemeId: z.string().optional(),
   status: z.enum(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"]).optional()
 });
 
 export type ListLeadsQuery = z.infer<typeof listLeadsQuerySchema>;
+
+// Validation for PATCH /api/v1/leads/:id/status
+export const updateLeadStatusSchema = z.object({
+  status: z.enum(["UNDER_REVIEW", "APPROVED", "REJECTED"], {
+    message: "Status must be UNDER_REVIEW, APPROVED, or REJECTED"
+  }),
+  actor: z
+    .string()
+    .trim()
+    .min(2, "Actor name must be at least 2 characters")
+    .max(60, "Actor name cannot exceed 60 characters")
+    .optional(),
+  notes: z
+    .string()
+    .trim()
+    .max(500, "Notes cannot exceed 500 characters")
+    .optional()
+});
+
+export type UpdateLeadStatusInput = z.infer<typeof updateLeadStatusSchema>;
+

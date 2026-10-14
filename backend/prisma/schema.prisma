@@ -39,9 +39,10 @@ model LoanApplication {
   appliedLoanAmount  Decimal?          @db.Decimal(12, 2)
   status             ApplicationStatus @default(SUBMITTED)
   schemeId           String
-  scheme             LoanScheme        @relation(fields: [schemeId], references: [id])
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  scheme             LoanScheme               @relation(fields: [schemeId], references: [id])
+  statusAudits       ApplicationStatusAudit[]
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
 
   @@index([mobileNumber, createdAt])
   @@map("loan_applications")
@@ -52,4 +53,33 @@ enum ApplicationStatus {
   UNDER_REVIEW
   APPROVED
   REJECTED
+}
+
+model ApplicationStatusAudit {
+  id             String            @id @default(uuid())
+  applicationId  String
+  previousStatus ApplicationStatus
+  newStatus      ApplicationStatus
+  actor          String            @default("SYSTEM_ADMIN")
+  notes          String?
+  createdAt      DateTime          @default(now())
+  application    LoanApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@map("application_status_audits")
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid())
+  key            String   @unique
+  requestPath    String
+  requestMethod  String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([key])
+  @@map("idempotency_records")
 }

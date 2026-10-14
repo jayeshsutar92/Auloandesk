@@ -58,6 +58,13 @@ graph TD
    - Built-in floating chat widget that allows seamless interaction without disrupting the guided application flow.
    - Strict guardrails: non-authoritative calculations, explicit confirmation enforcement, duplicate detection, and domain exclusivity.
 
+6. **B1: Backend Hardening & Production Reliability**:
+   - **Idempotency Protection**: `Idempotency-Key` header on `POST /api/v1/leads` with PostgreSQL transaction-level advisory locks, deterministic canonical payload hashing, and rejection of conflicting payload reuse (HTTP 400 `IDEMPOTENCY_PAYLOAD_MISMATCH`).
+   - **Concurrency-Safe Duplicate Detection**: Database-backed serialization via `pg_advisory_xact_lock` guaranteeing that simultaneous submissions for the same mobile produce exactly one creation (201) and subsequent requests receive HTTP 409 Conflict (`DUPLICATE_APPLICATION`) with `existingApplicationId`.
+   - **Application Status Workflow**: Enforced state machine (`SUBMITTED → UNDER_REVIEW → APPROVED` or `REJECTED`) via `PATCH /api/v1/leads/:id/status`.
+   - **Audit Log Trail**: Every status transition is atomically logged in `application_status_audits` in the same transaction, retrievable via `GET /api/v1/leads/:id/audits`.
+   - **Authoritative Cached Gold-Rate**: `GET /api/v1/gold-rate` serving the benchmark ₹7,000/g rate with 5-minute in-memory TTL caching and cache metadata.
+
 ---
 
 ## AI Assistant Configuration (Groq)
@@ -117,11 +124,17 @@ npm run dev
 ## Testing & Quality Verification
 
 ### Run Backend Tests (Vitest)
-Executes 39 unit, financial, API, and mocked Groq AI conversation tests:
+Executes 57 unit, financial, API, B1 concurrency & hardening, and mocked Groq AI conversation tests:
 ```bash
 cd backend
 npm run test
 ```
+Test Suites:
+- `test/backend-hardening.test.ts`: Idempotent retries, conflicting payload rejection, concurrent key safety, concurrent mobile race serialization, status state machine validation, transactional audit persistence, and gold rate cache.
+- `test/loan-api.test.ts`: REST endpoints, validations, scheme queries, server recalculation, duplicate 7-day lockout.
+- `test/loan-calculator.test.ts`: Precision calculations, net/gross assertions, LTV limits, RBI ceilings.
+- `test/ai-assistant.test.ts`: Groq assistant orchestration, tool calling guardrails, affirmative confirmation enforcement.
+- `test/health.test.ts`: Health check probe and system status.
 
 ### Run Linters & Typecheck
 ```bash
