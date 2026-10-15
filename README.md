@@ -111,6 +111,7 @@ DATABASE_URL=postgresql://postgres:postgrespassword@localhost:5432/auloandesk?sc
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=openai/gpt-oss-120b
 ```
+Alternatively, use your preferred AI provider's API key and model name, provided you update the backend configuration and integration to support that provider.
 
 > **Security Note:** `backend/.env` is excluded from git in `.gitignore`. Never commit real API keys or database passwords.
 
