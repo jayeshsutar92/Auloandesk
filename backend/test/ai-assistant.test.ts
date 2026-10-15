@@ -785,6 +785,176 @@ describe("Phase 5: AI Loan Assistant Services and Tool Calling", () => {
       expect(lower).not.toContain("openai");
       expect(response.message).toContain("Goldie");
     });
+
+    it("Successful confirmation: submits application exactly once, returns submittedApplication with ID, applicationNumber and status SUBMITTED, and suppresses pending confirmation cards", async () => {
+      const confirmMobile = `${TEST_AI_MOBILE_PREFIX}088`;
+
+      // Model calls submit_application
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_submit_1",
+                  type: "function",
+                  function: {
+                    name: "submit_application",
+                    arguments: JSON.stringify({
+                      fullName: "Sarah Jenkins",
+                      mobileNumber: confirmMobile,
+                      grossWeightGrams: 50,
+                      netWeightGrams: 45,
+                      karat: 22,
+                      schemeId: bulletSchemeId || "PLAN_BULLET_01",
+                      userConfirmed: true
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      });
+
+      // Model generates post-submission reply
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content:
+                "Your application has been registered successfully! Our credit manager will review your submission shortly."
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        {
+          role: "user",
+          content: "Yes, I confirm and authorize this gold loan application."
+        }
+      ]);
+
+      expect(response.toolExecutions.length).toBe(1);
+      expect(response.toolExecutions[0].toolName).toBe("submit_application");
+      expect(response.submittedApplication).toBeDefined();
+      expect(response.submittedApplication?.status).toBe("SUBMITTED");
+      expect(response.submittedApplication?.applicationNumber).toMatch(/^ALD-/);
+      expect(response.submittedApplication?.id).toBeDefined();
+      expect(response.submittedApplication?.fullName).toBe("Sarah Jenkins");
+
+      // Critical: applicationSummary must be null so no pending-confirmation card is shown
+      expect(response.applicationSummary).toBeNull();
+
+      // Message text must display the Application ID, Application Number, and status SUBMITTED
+      expect(response.message).toContain(response.submittedApplication?.applicationNumber);
+      expect(response.message).toContain(response.submittedApplication?.id);
+      expect(response.message).toContain("SUBMITTED");
+      expect(response.message).not.toContain("Do you confirm and authorize");
+    });
+
+    it("Repeated confirmation / post-submission query: does not trigger duplicate submission or throw unhandled 409 error", async () => {
+      const priorAppNumber = "ALD-1744690000000-1234";
+      const priorAppId = "cly1234567890abcdef";
+
+      // If model attempts to call submit_application on an already submitted thread:
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_submit_repeat",
+                  type: "function",
+                  function: {
+                    name: "submit_application",
+                    arguments: JSON.stringify({
+                      fullName: "Sarah Jenkins",
+                      mobileNumber: "9876600088",
+                      grossWeightGrams: 50,
+                      netWeightGrams: 45,
+                      karat: 22,
+                      schemeId: bulletSchemeId || "PLAN_BULLET_01",
+                      userConfirmed: true
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      });
+
+      // Model's subsequent message explaining submission status
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: `Your gold loan application has already been submitted under Application Number ${priorAppNumber} (Status: SUBMITTED). Our officer will reach out soon.`
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        {
+          role: "assistant",
+          content: `Your gold loan application has been successfully submitted!\n- **Application ID:** ${priorAppId}\n- **Application Number:** ${priorAppNumber}\n- **Status:** SUBMITTED`
+        },
+        {
+          role: "user",
+          content: "Can you confirm my application again?"
+        }
+      ]);
+
+      // Tool result should intercept with ALREADY_SUBMITTED without hitting DB or throwing 409
+      expect(response.toolExecutions.length).toBe(1);
+      const toolRes = response.toolExecutions[0].result as Record<string, unknown>;
+      expect(toolRes.error).toBe("ALREADY_SUBMITTED");
+      expect(toolRes.applicationNumber).toBe(priorAppNumber);
+
+      // Pending application summary must NEVER be displayed
+      expect(response.applicationSummary).toBeNull();
+      expect(response.message).toContain(priorAppNumber);
+      expect(response.message).toContain("SUBMITTED");
+      expect(response.message).not.toContain("Do you confirm");
+    });
+
+    it("Cancellation flow: user clicking Cancel or declining does not invoke submit_application", async () => {
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "I have cancelled this loan application submission. Please let me know if you would like to modify your gold weights, scheme, or applicant details."
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        {
+          role: "assistant",
+          content: "Please review your gold loan application summary below:\n\nDo you confirm and authorize this gold loan application? (Yes/No)"
+        },
+        {
+          role: "user",
+          content: "No, please cancel this application. I want to modify details."
+        }
+      ]);
+
+      expect(response.toolExecutions.length).toBe(0);
+      expect(response.submittedApplication).toBeNull();
+      expect(response.applicationSummary).toBeNull();
+      expect(response.message).toContain("cancelled this loan application");
+    });
   });
 });
 

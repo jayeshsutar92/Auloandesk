@@ -172,14 +172,17 @@ The backend hardening updates (B1) strengthen the infrastructure underlying the 
 - All calculations remain 100% backend-authoritative (`LoanCalculatorService`); the LLM never invents loan values.
 - Explicit user confirmation is strictly required prior to application submission.
 
-### 4. Automated Test Coverage
-- Automated test suite in `backend/test/ai-assistant.test.ts` covers:
-  - Complete application details producing authoritative quotes.
-  - Missing required fields triggering concise follow-up questions.
-  - Retention of previously provided applicant details during follow-ups.
-  - Verification that incomplete inputs never produce quote tables or application summaries.
-  - Verification of schema requirements (no extraneous payment method field).
-  - Verification that model/provider branding is absent from user-facing prompts and errors.
-  - Happy path with mandatory explicit confirmation before submission.
+### 5. Resolution of Repeated Confirmation & Post-Submission State
+- **Root Cause Identified**:
+  1. *React State Batching*: In `AiAssistantChat.tsx`, `handleConfirmCard` scheduled a state update to mark the card confirmed, but immediately called `handleSend` synchronously. `handleSend` captured the stale `messages` closure where `confirmationStatus` remained `"pending"`, overwriting the update and leaving the button active.
+  2. *Re-emitted Confirmation Summaries*: `SYSTEM_PROMPT` lacked explicit post-submission instructions. Because the model still saw all 6 applicant details in context, it re-emitted ````application-summary```` JSON blocks and confirmation questions even after `submit_application` succeeded.
+  3. *Duplicate Submission Lockout*: When the applicant clicked the re-rendered button, `submit_application` was invoked a second time, triggering the PostgreSQL 7-day lockout (`DUPLICATE_APPLICATION`), which confused applicants whose initial submission had already succeeded.
+- **Architectural Fixes**:
+  1. *Post-Submission System Rules*: Added Rule 6 to `SYSTEM_PROMPT` instructing the assistant to display the Application ID, Application Number (e.g. `ALD-XXXXX-XXXX`), and status `SUBMITTED`, never re-ask for confirmation, never emit ````application-summary```` blocks, and never invoke `submit_application` again.
+  2. *Authoritative Suppression in `extractChatSummaries`*: When `submit_application` succeeds (or if the conversation already contains a submitted application), `applicationSummary` is strictly set to `null` and any leftover confirmation prompts are stripped from the response text.
+  3. *Stateless Thread Session Interception*: The backend scans `conversationMessages` for existing `ALD-` application numbers. If detected, system context enforces post-submission behavior, and any repeat `submit_application` tool calls are intercepted with `ALREADY_SUBMITTED` without hitting PostgreSQL or throwing a 409 error.
+  4. *Frontend Synchronous Status Transitions*: `handleConfirmCard` and `handleCancelCard` pass the mutated message list directly to `handleSend`, ensuring pending cards immediately switch to `✓ Confirmed` or `✕ Cancelled`.
+  5. *Dedicated Submitted Application Card*: Rendered on the client when `submittedApplication` is returned, displaying Application ID, Application Number, `SUBMITTED` badge, and underwriting review details with no confirmation buttons.
+  6. *Automated Verification*: Added focused tests in `backend/test/ai-assistant.test.ts` covering single submission, post-submission reference queries, repeated confirmation prevention, and cancellation. All 67/67 backend tests pass.
 
 

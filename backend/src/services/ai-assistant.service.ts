@@ -84,13 +84,25 @@ CRITICAL OPERATIONAL RULES & GUARDRAILS:
    - ONLY call "submit_application" with "userConfirmed: true" after the user explicitly and affirmatively confirms (e.g., "yes", "confirm", "proceed", "I confirm").
    - If the user says "no", "cancel", "wait", or asks to modify details, do NOT submit.
 
-6. DUPLICATE APPLICATION HANDLING:
+6. POST-SUBMISSION STATE & REFERENCE DETAILS:
+   - Once "submit_application" has been successfully executed (or if the conversation history already indicates the application was submitted with an application number like ALD-XXXXX-XXXX):
+     * The application has been officially recorded in "SUBMITTED" status.
+     * You MUST clearly display:
+       1. Application ID
+       2. Application Number (e.g., ALD-XXXXX-XXXX)
+       3. Status: SUBMITTED
+     * You MUST NEVER ask for confirmation again.
+     * You MUST NEVER output the \`\`\`application-summary JSON block after submission has succeeded.
+     * You MUST NEVER call "submit_application" again for this customer.
+     * If the user asks about the submitted application afterward (e.g. status, reference, or modification queries), explain that it has already been submitted and provide its reference details (Application Number, Application ID, and SUBMITTED status).
+
+7. DUPLICATE APPLICATION HANDLING:
    - If "submit_application" returns a DUPLICATE_APPLICATION error, politely inform the user that an active application already exists for this mobile number within the last 7 days under RBI compliance rules. Provide the existing application ID and advise them that duplicate applications within 7 days cannot be created. Do NOT automatically retry.
 
-7. VALIDATION ERRORS:
+8. VALIDATION ERRORS:
    - If a tool returns a validation error (e.g. net weight > gross weight, invalid mobile number, invalid karat), clearly explain the error in simple terms and ask the user to provide corrected details.
 
-8. DOMAIN EXCLUSIVITY & PROMPT INJECTION RESISTANCE:
+9. DOMAIN EXCLUSIVITY & PROMPT INJECTION RESISTANCE:
    - Strictly decline any off-topic inquiries (such as stock market advice, crypto trading, general chit-chat, programming, or unrelated financial speculation) with:
      "I am AuLoanDesk's specialized Gold Loan Assistant. I can only assist you with gold loan inquiries, valuations, and applications. How can I help you with your gold loan today?"
    - Never provide personalized investment advice or promise guaranteed loan approval. Indicative quotes are subject to branch physical assay and KYC.
@@ -350,7 +362,21 @@ export async function executeTool(
 
         return {
           success: true,
-          application: lead
+          application: {
+            id: lead.applicationId,
+            applicationId: lead.applicationId,
+            applicationNumber: lead.applicationNumber,
+            status: lead.status,
+            fullName: lead.fullName,
+            mobileNumber: lead.maskedMobileNumber,
+            maskedMobileNumber: lead.maskedMobileNumber,
+            grossWeightGrams: gross,
+            netWeightGrams: net,
+            karat,
+            schemeId: lead.scheme.id,
+            schemeName: lead.scheme.name,
+            eligibleLoan: lead.eligibleLoan
+          }
         };
       } catch (err) {
         if (err instanceof DuplicateApplicationError) {
@@ -418,11 +444,22 @@ export interface ApplicationSummaryData {
   eligibleLoan: number;
 }
 
+export interface SubmittedApplicationData {
+  id: string;
+  applicationNumber: string;
+  status: string;
+  fullName: string;
+  maskedMobileNumber: string;
+  eligibleLoan: number;
+  schemeName?: string | undefined;
+}
+
 export interface AssistantChatResponse {
   message: string;
   toolExecutions: ToolExecutionRecord[];
-  applicationSummary?: ApplicationSummaryData | null;
-  quoteSummary?: QuoteSummaryData | null;
+  applicationSummary?: ApplicationSummaryData | null | undefined;
+  quoteSummary?: QuoteSummaryData | null | undefined;
+  submittedApplication?: SubmittedApplicationData | null | undefined;
 }
 
 /**
@@ -570,31 +607,94 @@ export function extractQuoteSummary(
 
 /**
  * Combines summary extraction and cleans raw Markdown pipe tables and JSON blocks.
+ * If an application was just submitted or was already submitted, suppresses pending confirmation summaries.
  */
 export function extractChatSummaries(
   rawMessage: string,
-  executedTools: ToolExecutionRecord[]
+  executedTools: ToolExecutionRecord[],
+  priorSubmission?: { applicationNumber?: string | undefined; id?: string | undefined } | null | undefined
 ): {
   message: string;
   applicationSummary: ApplicationSummaryData | null;
   quoteSummary: QuoteSummaryData | null;
+  submittedApplication: SubmittedApplicationData | null;
 } {
-  const { cleanedMessage: msgAfterApp, applicationSummary } = extractApplicationSummary(rawMessage);
+  const submitTool = executedTools.find(
+    (t) => t.toolName === "submit_application" && (t.result as { success?: boolean })?.success
+  );
+
+  let submittedApplication: SubmittedApplicationData | null = null;
+  if (submitTool && (submitTool.result as { application?: Record<string, unknown> })?.application) {
+    const app = (submitTool.result as { application: Record<string, unknown> }).application;
+    submittedApplication = {
+      id: String(app.applicationId || app.id || ""),
+      applicationNumber: String(app.applicationNumber || ""),
+      status: String(app.status || "SUBMITTED"),
+      fullName: String(app.fullName || ""),
+      maskedMobileNumber: String(app.maskedMobileNumber || ""),
+      eligibleLoan: Number(app.eligibleLoan || 0),
+      schemeName: typeof app.scheme === "object" && app.scheme !== null && "name" in app.scheme
+        ? String((app.scheme as { name: string }).name)
+        : (app.schemeName ? String(app.schemeName) : undefined)
+    };
+  }
+
+  // If application was just submitted or was already submitted in this conversation, NEVER return applicationSummary
+  const isSubmitted = !!submittedApplication || !!priorSubmission;
+
+  const { cleanedMessage: msgAfterApp, applicationSummary: rawAppSummary } = extractApplicationSummary(rawMessage);
+  const applicationSummary = isSubmitted ? null : rawAppSummary;
+
   const { cleanedMessage: msgAfterQuote, quoteSummary } = extractQuoteSummary(msgAfterApp, executedTools);
 
   // Clean raw Markdown pipe tables so raw pipes are never presented as unformatted text
   let finalMessage = stripMarkdownTables(msgAfterQuote);
 
-  if (!finalMessage && (applicationSummary || quoteSummary)) {
-    finalMessage = applicationSummary
-      ? "Please review your gold loan application summary below:"
-      : "Here is your indicative gold loan quote:";
+  // If submitted, strip any leftover confirmation prompt from finalMessage
+  if (isSubmitted) {
+    finalMessage = finalMessage
+      .replace(/Do you confirm and authorize this gold loan application\?\s*\(Yes\/No\)/gi, "")
+      .replace(/Please confirm:?\s*Do you wish to submit.*?\(Yes\/No\)/gi, "")
+      .replace(/Do you wish to submit.*?\(Yes\/No\)/gi, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  // If newly submitted, ensure Application ID, Application Number, and status SUBMITTED are clearly present
+  if (submittedApplication) {
+    const hasAppNum = finalMessage.includes(submittedApplication.applicationNumber);
+    const hasAppId = submittedApplication.id ? finalMessage.includes(submittedApplication.id) : true;
+    const hasStatus = finalMessage.includes("SUBMITTED");
+
+    if (!hasAppNum || !hasStatus || !hasAppId) {
+      const referenceDetails = [
+        `\n\n**Application Reference Details:**`,
+        `- **Application Number:** ${submittedApplication.applicationNumber}`,
+        submittedApplication.id ? `- **Application ID:** ${submittedApplication.id}` : null,
+        `- **Status:** ${submittedApplication.status}`
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      finalMessage = `${finalMessage}${referenceDetails}`.trim();
+    }
+  }
+
+  if (!finalMessage && (applicationSummary || quoteSummary || submittedApplication)) {
+    if (submittedApplication) {
+      finalMessage = `Your gold loan application has been successfully submitted under Application Number ${submittedApplication.applicationNumber} (Status: SUBMITTED).`;
+    } else {
+      finalMessage = applicationSummary
+        ? "Please review your gold loan application summary below:"
+        : "Here is your indicative gold loan quote:";
+    }
   }
 
   return {
     message: finalMessage || "How can I assist you with your gold loan today?",
     applicationSummary,
-    quoteSummary
+    quoteSummary,
+    submittedApplication
   };
 }
 
@@ -613,6 +713,23 @@ export async function chatWithAssistant(
   const groq = new Groq({ apiKey });
   const model = env.GROQ_MODEL || "openai/gpt-oss-120b";
 
+  // Check if conversation history already contains a submitted application
+  let priorAppNumber: string | null = null;
+  let priorAppId: string | null = null;
+
+  for (const m of conversationMessages) {
+    if (m.role === "assistant") {
+      const appNumMatch = m.content.match(/\b(ALD-\d+-\d+)\b/);
+      if (appNumMatch && appNumMatch[1]) {
+        priorAppNumber = appNumMatch[1];
+      }
+      const appIdMatch = m.content.match(/Application ID:\s*([a-zA-Z0-9-]+)/i);
+      if (appIdMatch && appIdMatch[1]) {
+        priorAppId = appIdMatch[1];
+      }
+    }
+  }
+
   // Build full message thread with system prompt
   const messages: Groq.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -621,6 +738,13 @@ export async function chatWithAssistant(
       content: m.content
     }))
   ];
+
+  if (priorAppNumber) {
+    messages.push({
+      role: "system",
+      content: `IMPORTANT CONTEXT: An application has ALREADY been submitted in this conversation with Application Number: ${priorAppNumber}${priorAppId ? `, Application ID: ${priorAppId}` : ""}, Status: SUBMITTED. You MUST NOT call submit_application again. You MUST NOT display an application-summary card or ask for confirmation again. If the customer asks about their application, changes, or status, explain that it has already been submitted and provide its reference details.`
+    });
+  }
 
   const executedTools: ToolExecutionRecord[] = [];
   const MAX_TOOL_ITERATIONS = 5;
@@ -679,7 +803,19 @@ export async function chatWithAssistant(
           parsedArgs = {};
         }
 
-        const toolResult = await executeTool(tc.function.name, parsedArgs);
+        let toolResult: unknown;
+        if (tc.function.name === "submit_application" && priorAppNumber) {
+          // Prevent repeated submission if application was already submitted in this conversation
+          toolResult = {
+            success: false,
+            error: "ALREADY_SUBMITTED",
+            applicationNumber: priorAppNumber,
+            applicationId: priorAppId ?? undefined,
+            message: `This application was already successfully submitted in this conversation (Application Number: ${priorAppNumber}, Status: SUBMITTED). Do not submit again.`
+          };
+        } else {
+          toolResult = await executeTool(tc.function.name, parsedArgs);
+        }
 
         executedTools.push({
           toolName: tc.function.name,
@@ -696,30 +832,34 @@ export async function chatWithAssistant(
     } else {
       // Model responded with final text
       const rawText = assistantMsg.content || "I am here to help you with your gold loan. How can I assist you?";
-      const { message: finalMessage, applicationSummary, quoteSummary } = extractChatSummaries(
+      const { message: finalMessage, applicationSummary, quoteSummary, submittedApplication } = extractChatSummaries(
         rawText,
-        executedTools
+        executedTools,
+        priorAppNumber ? { applicationNumber: priorAppNumber, id: priorAppId ?? undefined } : null
       );
 
       return {
         message: finalMessage,
         toolExecutions: executedTools,
         applicationSummary,
-        quoteSummary
+        quoteSummary,
+        submittedApplication
       };
     }
   }
 
   // If loop exhausted
-  const { message: finalMessage, applicationSummary, quoteSummary } = extractChatSummaries(
+  const { message: finalMessage, applicationSummary, quoteSummary, submittedApplication } = extractChatSummaries(
     "I processed your request, but the operation took too many conversational turns. Please review your details and confirm.",
-    executedTools
+    executedTools,
+    priorAppNumber ? { applicationNumber: priorAppNumber, id: priorAppId ?? undefined } : null
   );
 
   return {
     message: finalMessage,
     toolExecutions: executedTools,
     applicationSummary,
-    quoteSummary
+    quoteSummary,
+    submittedApplication
   };
 }

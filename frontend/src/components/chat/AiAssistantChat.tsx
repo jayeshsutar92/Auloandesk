@@ -5,7 +5,8 @@ import {
   type ChatMessage,
   type ToolExecutionRecord,
   type ApplicationSummaryData,
-  type QuoteSummaryData
+  type QuoteSummaryData,
+  type SubmittedApplicationData
 } from "../../services/api.js";
 import { ApplicationConfirmationCard } from "./ApplicationConfirmationCard.js";
 import { QuoteSummaryCard } from "./QuoteSummaryCard.js";
@@ -16,6 +17,7 @@ interface DisplayMessage extends ChatMessage {
   toolExecutions?: ToolExecutionRecord[];
   applicationSummary?: ApplicationSummaryData | null;
   quoteSummary?: QuoteSummaryData | null;
+  submittedApplication?: SubmittedApplicationData | null;
   confirmationStatus?: "pending" | "confirmed" | "cancelled";
 }
 
@@ -117,9 +119,27 @@ export const AiAssistantChat: React.FC = () => {
     }
   }, [messages, isOpen]);
 
-  const handleSend = async (textToSend?: string) => {
+  const handleSend = async (textToSend?: string, baseMessages?: DisplayMessage[]) => {
     const text = (textToSend || input).trim();
     if (!text || loading) return;
+
+    let sourceMessages = baseMessages || messages;
+    const lowerText = text.toLowerCase();
+
+    // If user explicitly sent text matching yes/no, update any pending confirmation card in sourceMessages
+    if (lowerText.includes("yes") || lowerText.includes("confirm") || lowerText.includes("proceed")) {
+      sourceMessages = sourceMessages.map((m) =>
+        m.confirmationStatus === "pending"
+          ? { ...m, confirmationStatus: "confirmed" as const }
+          : m
+      );
+    } else if (lowerText.includes("no") || lowerText.includes("cancel") || lowerText.includes("modify")) {
+      sourceMessages = sourceMessages.map((m) =>
+        m.confirmationStatus === "pending"
+          ? { ...m, confirmationStatus: "cancelled" as const }
+          : m
+      );
+    }
 
     idCounter.current += 1;
     const userMessage: DisplayMessage = {
@@ -128,27 +148,7 @@ export const AiAssistantChat: React.FC = () => {
       content: text
     };
 
-    // If user explicitly sent text matching yes/no, update any pending confirmation card
-    const lowerText = text.toLowerCase();
-    if (lowerText.includes("yes") || lowerText.includes("confirm") || lowerText.includes("proceed")) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.confirmationStatus === "pending"
-            ? { ...m, confirmationStatus: "confirmed" }
-            : m
-        )
-      );
-    } else if (lowerText.includes("no") || lowerText.includes("cancel") || lowerText.includes("modify")) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.confirmationStatus === "pending"
-            ? { ...m, confirmationStatus: "cancelled" }
-            : m
-        )
-      );
-    }
-
-    const newThread = [...messages, userMessage];
+    const newThread = [...sourceMessages, userMessage];
     setMessages(newThread);
     setInput("");
     setLoading(true);
@@ -162,17 +162,30 @@ export const AiAssistantChat: React.FC = () => {
       const response = await sendAssistantChat(apiMessages);
 
       idCounter.current += 1;
+      const submitted = response.submittedApplication || null;
+
       const assistantMessage: DisplayMessage = {
         id: `assistant-${idCounter.current}`,
         role: "assistant",
         content: response.message,
         toolExecutions: response.toolExecutions,
-        applicationSummary: response.applicationSummary || null,
+        applicationSummary: submitted ? null : (response.applicationSummary || null),
         quoteSummary: response.quoteSummary || null,
-        confirmationStatus: response.applicationSummary ? "pending" : undefined
+        submittedApplication: submitted,
+        confirmationStatus: submitted ? undefined : (response.applicationSummary ? "pending" : undefined)
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages((prev) => {
+        if (submitted) {
+          // If submitted, guarantee any pending confirmation card in previous messages is marked confirmed
+          return prev.map((m) =>
+            m.confirmationStatus === "pending"
+              ? { ...m, confirmationStatus: "confirmed" as const }
+              : m
+          ).concat(assistantMessage);
+        }
+        return [...prev, assistantMessage];
+      });
     } catch (err) {
       let errorMessage = "I encountered a connection error. Please try again.";
       if (err instanceof ApiServiceError) {
@@ -193,21 +206,19 @@ export const AiAssistantChat: React.FC = () => {
   };
 
   const handleConfirmCard = (messageId: string) => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === messageId ? { ...m, confirmationStatus: "confirmed" } : m
-      )
+    const updated = messages.map((m) =>
+      m.id === messageId ? { ...m, confirmationStatus: "confirmed" as const } : m
     );
-    void handleSend("Yes, I confirm and authorize this gold loan application.");
+    setMessages(updated);
+    void handleSend("Yes, I confirm and authorize this gold loan application.", updated);
   };
 
   const handleCancelCard = (messageId: string) => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === messageId ? { ...m, confirmationStatus: "cancelled" } : m
-      )
+    const updated = messages.map((m) =>
+      m.id === messageId ? { ...m, confirmationStatus: "cancelled" as const } : m
     );
-    void handleSend("No, please cancel this application. I want to modify details.");
+    setMessages(updated);
+    void handleSend("No, please cancel this application. I want to modify details.", updated);
   };
 
   const handleClear = () => {
@@ -308,7 +319,7 @@ export const AiAssistantChat: React.FC = () => {
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
             {messages.map((m) => {
               const isUser = m.role === "user";
-              const summary = m.applicationSummary || (!isUser ? extractClientApplicationSummary(m.content) : null);
+              const summary = !m.submittedApplication && (m.applicationSummary || (!isUser ? extractClientApplicationSummary(m.content) : null));
               const displayContent = cleanContentText(m.content);
 
               return (
@@ -340,6 +351,64 @@ export const AiAssistantChat: React.FC = () => {
                       />
                     )}
 
+                    {/* Structured Application Submitted Status Card Component */}
+                    {m.submittedApplication && (
+                      <div className="mt-3 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-500/40 p-4 shadow-xl shadow-slate-950/50 space-y-3">
+                        <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs border border-emerald-500/30">
+                              ✓
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-emerald-300 text-xs">
+                                Application Submitted & Registered
+                              </h4>
+                              <p className="text-[10px] text-slate-400">
+                                Official AuLoanDesk Origination Record
+                              </p>
+                            </div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-400/15 text-emerald-400 border border-emerald-400/30 font-mono">
+                            {m.submittedApplication.status}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-medium">Application Number</span>
+                            <span className="font-mono font-bold text-amber-300 text-xs block">
+                              {m.submittedApplication.applicationNumber}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-medium">Application ID</span>
+                            <span className="font-mono text-slate-300 text-[11px] block truncate" title={m.submittedApplication.id}>
+                              {m.submittedApplication.id}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block">Sanctioned Amount</span>
+                            <span className="text-sm font-bold text-amber-400 font-mono">
+                              ₹{m.submittedApplication.eligibleLoan.toLocaleString("en-IN")}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-400 block">Applicant</span>
+                            <span className="text-xs font-semibold text-slate-200">
+                              {m.submittedApplication.fullName} ({m.submittedApplication.maskedMobileNumber})
+                            </span>
+                          </div>
+                        </div>
+
+                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                          Your gold loan application is officially logged in SUBMITTED status. Our branch credit officer will contact you shortly to complete KYC verification and physical gold assay.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Render tool execution status badges if present */}
                     {m.toolExecutions && m.toolExecutions.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
@@ -351,26 +420,47 @@ export const AiAssistantChat: React.FC = () => {
                             return null;
                           }
 
-                          if (te.toolName === "submit_application" && result?.application) {
-                            const app = result.application as {
+                          if (te.toolName === "submit_application" && (m.submittedApplication || result?.application)) {
+                            // Suppress duplicate tool execution badge when submitted card is rendered
+                            if (m.submittedApplication) return null;
+
+                            const app = result?.application as {
+                              id?: string;
+                              applicationId?: string;
                               applicationNumber: string;
                               maskedMobileNumber: string;
                               eligibleLoan: number;
+                              status?: string;
                             };
                             return (
                               <div
                                 key={idx}
                                 className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 text-[11px] space-y-1"
                               >
-                                <div className="font-bold flex items-center gap-1">
-                                  <span>✓</span> Application Registered
+                                <div className="font-bold flex items-center justify-between">
+                                  <span className="flex items-center gap-1">✓ Application Registered</span>
+                                  <span className="font-mono text-emerald-300 font-bold">{app.status || "SUBMITTED"}</span>
                                 </div>
                                 <div className="font-mono text-amber-300 font-bold">
                                   {app.applicationNumber}
                                 </div>
-                                <div className="text-[10px] text-slate-400">
-                                  Mobile: {app.maskedMobileNumber} • Sanction: ₹{app.eligibleLoan.toLocaleString("en-IN")}
+                                <div className="text-[10px] text-slate-400 truncate">
+                                  ID: {app.id || app.applicationId} • Mobile: {app.maskedMobileNumber} • Sanction: ₹{app.eligibleLoan.toLocaleString("en-IN")}
                                 </div>
+                              </div>
+                            );
+                          }
+
+                          if (te.toolName === "submit_application" && result?.error === "ALREADY_SUBMITTED") {
+                            return (
+                              <div
+                                key={idx}
+                                className="p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 text-[11px]"
+                              >
+                                <div className="font-bold text-emerald-400">✓ Application Already Submitted</div>
+                                <p className="text-[10px] mt-0.5 text-slate-400">
+                                  {String(result.message)}
+                                </p>
                               </div>
                             );
                           }

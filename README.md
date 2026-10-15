@@ -124,7 +124,7 @@ npm run dev
 ## Testing & Quality Verification
 
 ### Run Backend Tests (Vitest)
-Executes 64 unit, financial, API, B1 concurrency & hardening, and conversational AI flow tests:
+Executes 67 unit, financial, API, B1 concurrency & hardening, and conversational AI flow tests:
 ```bash
 cd backend
 npm run test

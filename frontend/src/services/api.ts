@@ -158,11 +158,22 @@ export interface QuoteSummaryData {
   schemes: QuoteSchemeData[];
 }
 
+export interface SubmittedApplicationData {
+  id: string;
+  applicationNumber: string;
+  status: string;
+  fullName: string;
+  maskedMobileNumber: string;
+  eligibleLoan: number;
+  schemeName?: string;
+}
+
 export interface AssistantChatResponse {
   message: string;
   toolExecutions: ToolExecutionRecord[];
   applicationSummary?: ApplicationSummaryData | null;
   quoteSummary?: QuoteSummaryData | null;
+  submittedApplication?: SubmittedApplicationData | null;
 }
 
 export async function sendAssistantChat(

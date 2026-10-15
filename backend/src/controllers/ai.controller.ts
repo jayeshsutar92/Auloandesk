@@ -17,7 +17,8 @@ export async function handleAssistantChat(
         message: response.message,
         toolExecutions: response.toolExecutions,
         applicationSummary: response.applicationSummary || null,
-        quoteSummary: response.quoteSummary || null
+        quoteSummary: response.quoteSummary || null,
+        submittedApplication: response.submittedApplication || null
       }
     });
   } catch (err) {
