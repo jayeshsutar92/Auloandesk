@@ -8,77 +8,111 @@ AuLoanDesk is an institutional-grade, full-stack digital gold loan origination p
 
 ```mermaid
 graph TD
-    Client[Web Frontend: React 19 + TypeScript + Vite]
-    AdminDash[Admin Dashboard /leads]
+    Client[Web Frontend: React 19 + TypeScript + Vite + Tailwind CSS v4]
+    AdminDash[Admin Dashboard: /leads]
     ChatWidget[Goldie AI Chat Panel]
-    GuidedFlow[3-Step Loan Flow]
+    GuidedFlow[3-Step Loan Origination Flow]
     
-    Backend[Node.js + Express + TypeScript Backend]
-    Prisma[(PostgreSQL + Prisma ORM)]
+    Backend[Node.js + Express 5 + TypeScript + ESM Backend]
+    Prisma[(PostgreSQL + Prisma ORM 7.10)]
     GroqAPI[Groq API: openai/gpt-oss-120b]
 
-    GuidedFlow -->|POST /quotes & POST /leads| Backend
-    AdminDash -->|GET /leads| Backend
-    ChatWidget -->|POST /assistant/chat| Backend
+    GuidedFlow -->|POST /api/v1/quotes & POST /api/v1/leads| Backend
+    AdminDash -->|GET /api/v1/leads & PATCH /api/v1/leads/:id/status| Backend
+    ChatWidget -->|POST /api/v1/assistant/chat| Backend
     
     Backend -->|Tool 1: get_loan_schemes| Prisma
     Backend -->|Tool 2: calculate_quote| Backend
     Backend -->|Tool 3: submit_application| Prisma
-    Backend <-->|Chat Completions & Tool Calling| GroqAPI
+    Backend <-->|Chat Completions & Function Tool Calling| GroqAPI
 ```
 
 ---
 
-## Key Highlights & Phases
+## Core System Architecture & Highlights
 
-1. **Phase 1: Backend Foundation**:
-   - Modular Express application architecture in TypeScript with ESM.
-   - Comprehensive middleware stack: Helmet security headers, CORS origin whitelisting, Zod payload validation, and centralized error handling.
+### 1. Backend Foundation (Node.js, Express 5, TypeScript ESM)
+- **Modular Architecture**: Clean separation of concerns across routes, controllers, services, middleware, and validators.
+- **Security Middleware Stack**:
+  - `helmet`: Security headers configured for API protection.
+  - `cors`: Explicit origin whitelisting (`CORS_ORIGIN`).
+  - `zod`: Strict request payload validation on all incoming data.
+  - Centralized error handling: Consistent JSON error contract with domain-specific HTTP status codes.
 
-2. **Phase 2: Database & Financial Calculation Engine**:
-   - PostgreSQL schema with Prisma ORM migrations and seeding.
-   - Seeded schemes:
-     - `PLAN_BULLET_01`: Bullet Repayment, 12% p.a., 12-month tenure, 70% Max LTV.
-     - `PLAN_EMI_01`: Monthly EMI, 10.5% p.a., 12-month tenure, 75% Max LTV (RBI compliant ceiling).
-   - High-precision financial calculations using `Decimal.js` and integer rounding.
+### 2. Database Models & Precision Calculation Engine
+- **PostgreSQL with Prisma ORM 7.10** (`@prisma/adapter-pg` driver adapter):
+  - `LoanScheme`: Active schemes with interest rates, tenures, and maximum LTV ceilings.
+  - `LoanApplication`: Ingested loan applications with masked contact details, gold weights, karat, valuation, and statuses.
+  - `ApplicationStatusAudit`: Immutable audit log capturing status transitions, acting officer, and review notes.
+  - `IdempotencyRecord`: Transactional idempotency store mapping deterministic request hashes to cached responses.
+- **Active Seeded Schemes**:
+  - `PLAN_BULLET_01`: **Bullet Repayment** — 12.0% p.a., 12-month tenure, 70% max LTV.
+  - `PLAN_EMI_01`: **Monthly EMI** — 10.5% p.a., 12-month tenure, 75% max LTV (regulatory RBI ceiling).
+- **Financial Calculation Engine (`LoanCalculatorService`)**:
+  - Pure gold conversion: $\text{netWeight} \times \frac{\text{karat}}{24}$.
+  - Benchmark 24K valuation: Pure gold grams $\times$ ₹7,000/g.
+  - Eligible loan amount: Floor rounding to nearest integer of $\text{goldValue} \times \text{maxLtv}$.
+  - All financial math computed using `Decimal.js` to eliminate IEEE-754 floating-point inaccuracies.
 
-3. **Phase 3: Backend REST APIs**:
-   - `GET /api/v1/loan-schemes`: Fetches active schemes.
-   - `POST /api/v1/quotes`: Debounced calculation endpoint.
-   - `POST /api/v1/leads`: Lead ingestion with 7-day mobile lockout and number masking.
-   - `GET /api/v1/leads`: Filterable administrative queue.
+### 3. REST API Endpoints
 
-4. **Phase 4: Frontend Application**:
-   - Clean slate/gold institutional aesthetic built using React 19, Tailwind CSS v4, and Vite.
-   - 3-step responsive guided flow: Applicant Details $\rightarrow$ Live Debounced Quotes $\rightarrow$ Review & Explicit Confirmation.
-   - Admin leads dashboard with search filter, masked mobile display, and application detail modals.
+| Method | Endpoint | Description | Auth / Headers |
+|---|---|---|---|
+| `GET` | `/health`, `/api/v1/health` | Service health probe (uptime, status, environment) | Public |
+| `GET` | `/api/v1/gold-rate` | Authoritative 24K benchmark gold rate (₹7,000/g) with 5-minute TTL cache | Public |
+| `GET` | `/api/v1/loan-schemes` | List of all active gold loan schemes | Public |
+| `POST` | `/api/v1/quotes` | Valuation calculation across schemes for specified weight and karat | `Content-Type: application/json` |
+| `POST` | `/api/v1/leads` | Submit new gold loan application (supports idempotency & concurrency locks) | `Idempotency-Key` (optional) |
+| `GET` | `/api/v1/leads` | Administrative lead queue with scheme and status filters | Query params: `schemeId`, `status` |
+| `PATCH` | `/api/v1/leads/:id/status` | Enforce application status transition (`SUBMITTED` $\rightarrow$ `UNDER_REVIEW` $\rightarrow$ `APPROVED` / `REJECTED`) | `Content-Type: application/json` |
+| `GET` | `/api/v1/leads/:id/audits` | Retrieve chronological audit trail for a loan application | Public |
+| `POST` | `/api/v1/assistant/chat` | AI Assistant conversational endpoint with function tool calling | `Content-Type: application/json` |
 
-5. **Phase 5: Groq-Powered AI Loan Assistant ("Goldie")**:
-   - Backend-orchestrated tool-calling agent using Groq's `openai/gpt-oss-120b`.
-   - Built-in floating chat widget that allows seamless interaction without disrupting the guided application flow.
-   - Strict guardrails: non-authoritative calculations, explicit confirmation enforcement, duplicate detection, and domain exclusivity.
+### 4. Production Hardening & Reliability (B1)
+- **Idempotency Protection**: Supports `Idempotency-Key` on `POST /api/v1/leads`. Replays return the cached response without creating duplicates. Reusing the same key with differing payloads is rejected with HTTP 400 (`IDEMPOTENCY_PAYLOAD_MISMATCH`).
+- **Concurrency-Safe Deduplication**: Uses PostgreSQL transaction advisory locks (`pg_advisory_xact_lock`) to serialize simultaneous submissions on the same mobile number. Conflicting concurrent requests return HTTP 409 (`DUPLICATE_APPLICATION`) with the `existingApplicationId`.
+- **Application Status Lifecycle**: Strict state-machine validation prevents invalid transitions (e.g., direct jumps from `SUBMITTED` to `APPROVED` or modifications to terminal states).
+- **Atomic Audit Trail**: Every status change atomically creates an `ApplicationStatusAudit` record within the same database transaction.
+- **Cached Gold Benchmark**: In-memory 5-minute TTL cache for the ₹7,000/g benchmark rate with stale-while-revalidate safety.
 
-6. **B1: Backend Hardening & Production Reliability**:
-   - **Idempotency Protection**: `Idempotency-Key` header on `POST /api/v1/leads` with PostgreSQL transaction-level advisory locks, deterministic canonical payload hashing, and rejection of conflicting payload reuse (HTTP 400 `IDEMPOTENCY_PAYLOAD_MISMATCH`).
-   - **Concurrency-Safe Duplicate Detection**: Database-backed serialization via `pg_advisory_xact_lock` guaranteeing that simultaneous submissions for the same mobile produce exactly one creation (201) and subsequent requests receive HTTP 409 Conflict (`DUPLICATE_APPLICATION`) with `existingApplicationId`.
-   - **Application Status Workflow**: Enforced state machine (`SUBMITTED → UNDER_REVIEW → APPROVED` or `REJECTED`) via `PATCH /api/v1/leads/:id/status`.
-   - **Audit Log Trail**: Every status transition is atomically logged in `application_status_audits` in the same transaction, retrievable via `GET /api/v1/leads/:id/audits`.
-   - **Authoritative Cached Gold-Rate**: `GET /api/v1/gold-rate` serving the benchmark ₹7,000/g rate with 5-minute in-memory TTL caching and cache metadata.
+### 5. Frontend Client Application (React 19, TypeScript, Vite, Tailwind CSS v4)
+- **Guided 3-Step Wizard**:
+  1. *Collateral Details*: Gross weight, net gold weight, karat purity selection (18K, 22K, 24K).
+  2. *Live Debounced Quotes*: Instant valuation, pure gold weight, and comparison of Bullet vs. EMI schemes.
+  3. *Applicant Information & Confirmation*: Contact info, masked preview, explicit submission consent.
+- **Administrative Leads Dashboard (`/leads`)**:
+  - Filterable by loan scheme and application status.
+  - Masked mobile display (`9876XXXX10`) protecting borrower privacy.
+  - Application detail modals with collateral breakdown, audit trail, and status transition actions.
+- **Floating Goldie AI Assistant Widget**:
+  - Slide-over chat widget available across all views.
+  - Dynamic UI components: `QuoteSummaryCard`, `ApplicationConfirmationCard` (with visible **Confirm Application** and **Cancel** buttons), and `ApplicationSubmittedCard`.
+  - Double-scroll auto-alignment ensuring action buttons are immediately visible without requiring manual scroll hunting.
 
 ---
 
 ## AI Assistant Configuration (Groq)
 
 ### Environment Variables
-Configure the following keys in `backend/.env` (refer to `backend/.env.example`):
+Configure the following in `backend/.env` (see `backend/.env.example`):
 
 ```ini
+# Server Configuration
+PORT=4000
+NODE_ENV=development
+
+# Security & CORS
+CORS_ORIGIN=http://localhost:5173
+
+# Database Connection (PostgreSQL)
+DATABASE_URL=postgresql://postgres:postgrespassword@localhost:5432/auloandesk?schema=public
+
 # AI Assistant Configuration (Groq)
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=openai/gpt-oss-120b
 ```
 
-> **Security Note:** `backend/.env` is strictly excluded from version control in `.gitignore`. Never commit API keys or credentials.
+> **Security Note:** `backend/.env` is excluded from git in `.gitignore`. Never commit real API keys or database passwords.
 
 ### Registered AI Tools
 The assistant is constrained to three backend-enforced tools:
@@ -91,60 +125,90 @@ The assistant is constrained to three backend-enforced tools:
 ## Getting Started
 
 ### Prerequisites
-- Node.js 20+ (ESM compatible)
-- PostgreSQL 14+
-- Groq API Key
+- **Node.js**: v20+ (ESM compatible)
+- **npm**: v10+
+- **PostgreSQL**: v14+ (running locally or accessible via network)
+- **Groq API Key**: Active key from [Groq Console](https://console.groq.com/)
 
-### 1. Database Setup
-Ensure PostgreSQL is running locally and set `DATABASE_URL` in `backend/.env`:
+---
+
+### Step-by-Step Installation & Setup
+
+#### 1. Clone the Repository
+```bash
+git clone https://github.com/jayeshsutar92/Auloandesk.git
+cd Auloandesk
+```
+
+#### 2. Backend Setup
 ```bash
 cd backend
 npm install
+
+# Configure environment variables
+cp .env.example .env
+# Edit .env and supply your DATABASE_URL and GROQ_API_KEY
+
+# Apply database migrations and seed loan schemes
 npx prisma migrate dev
 npm run db:seed
 ```
 
-### 2. Run the Backend Service
+#### 3. Frontend Setup
+```bash
+cd ../frontend
+npm install
+
+# Configure environment variables (optional, defaults to http://localhost:4000/api/v1)
+cp .env.example .env
+```
+
+---
+
+### Running the Application
+
+#### Start Backend Server
 ```bash
 cd backend
 npm run dev
-# Server boots at http://localhost:4000
+# Server starts on http://localhost:4000
+# Health check: http://localhost:4000/health
 ```
 
-### 3. Run the Frontend Application
+#### Start Frontend Development Server
 ```bash
 cd frontend
-npm install
 npm run dev
 # Application accessible at http://localhost:5173
 ```
 
 ---
 
-## Testing & Quality Verification
+## Testing & Verification
 
 ### Run Backend Tests (Vitest)
-Executes 67 unit, financial, API, B1 concurrency & hardening, and conversational AI flow tests:
+Executes all 68 unit, financial, API, concurrency, and conversational AI tests:
 ```bash
 cd backend
-npm run test
+npm test
 ```
-Test Suites:
-- `test/backend-hardening.test.ts`: Idempotent retries, conflicting payload rejection, concurrent key safety, concurrent mobile race serialization, status state machine validation, transactional audit persistence, and gold rate cache.
-- `test/loan-api.test.ts`: REST endpoints, validations, scheme queries, server recalculation, duplicate 7-day lockout.
-- `test/loan-calculator.test.ts`: Precision calculations, net/gross assertions, LTV limits, RBI ceilings.
-- `test/ai-assistant.test.ts`: Groq assistant orchestration, tool calling guardrails, affirmative confirmation enforcement.
-- `test/health.test.ts`: Health check probe and system status.
 
-### Run Linters & Typecheck
+#### Test Suite Breakdown (68 Tests Total)
+- `test/loan-calculator.test.ts` (8 tests): Decimal precision, net/gross validation, karat purity math, LTV limits.
+- `test/health.test.ts` (2 tests): Health check probe, uptime, and system status endpoints.
+- `test/ai-assistant.test.ts` (26 tests): Groq assistant orchestration, tool calling, missing detail follow-ups, confirmation cards, duplicate prevention, and post-submission persistence.
+- `test/loan-api.test.ts` (15 tests): REST API endpoints, scheme listing, quote calculations, lead ingestion, 7-day lockout, and filtering.
+- `test/backend-hardening.test.ts` (17 tests): Idempotency key replay and mismatch rejection, PostgreSQL advisory locking, status transitions, and audit logs.
+
+### Run Code Quality Checks
 ```bash
-# Backend
+# Backend linting and type checking
 cd backend
 npm run lint
 npm run typecheck
 
-# Frontend
-cd frontend
+# Frontend linting and production bundle build
+cd ../frontend
 npm run lint
 npm run build
 ```
@@ -152,6 +216,8 @@ npm run build
 ---
 
 ## Regulatory Compliance & Safeguards
-- **RBI LTV Ceiling**: Max loan-to-value is strictly capped at 75% of assessed 24K collateral value.
-- **7-Day Anti-Duplicate Lockout**: Re-applications with the same mobile number within 7 days are rejected with HTTP 409 (`DUPLICATE_APPLICATION`).
-- **Data Privacy**: Mobile numbers are masked in all administrative lists and AI responses (e.g., `9876XXXX10`).
+
+- **RBI Loan-to-Value (LTV) Ceiling**: Statutory maximum LTV is strictly capped at 75% of assessed 24K gold collateral value.
+- **7-Day Anti-Duplicate Mobile Lockout**: Re-applications with the same mobile number within 7 days are rejected with HTTP 409 (`DUPLICATE_APPLICATION`).
+- **Data Privacy & Masking**: Customer mobile numbers are masked in all public UI views, admin lists, and assistant conversations (`9876XXXX10`). Full numbers are stored securely for authorized KYC/credit verification only.
+- **Explicit Informed Consent**: Applications require deliberate affirmative confirmation (via visible UI action button or explicit confirmation phrase) before submission.
