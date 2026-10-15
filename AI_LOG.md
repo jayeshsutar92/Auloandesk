@@ -142,3 +142,44 @@ The backend hardening updates (B1) strengthen the infrastructure underlying the 
 3. **Authoritative Gold Benchmark**:
    Both the AI `calculate_quote` tool and the REST `POST /api/v1/quotes` endpoint derive collateral valuation strictly from `getCurrentRate24k()`, ensuring consistent pricing across direct web application flows and interactive conversational sessions.
 
+---
+
+## 6. Conversational Flow Hardening & UI Polish
+
+### 1. Model Branding Removal
+- All applicant-facing references to model/provider branding (such as the "Groq 120B" badge or GPT model names) have been removed from the frontend chat interface and system prompts.
+- The assistant is presented simply and professionally as the **AuLoanDesk Loan Assistant**.
+- Model configuration (`GROQ_MODEL`, `GROQ_API_KEY`) remains strictly internal to the backend orchestration service.
+
+### 2. Missing Details Protocol
+- **Strict Pre-Calculation Validation**: The assistant must collect and validate all required application details before calculating quotes or preparing an application:
+  - Gold valuation quotes require: `grossWeightGrams`, `netWeightGrams`, and `karat`.
+  - Loan applications require: `fullName`, `mobileNumber`, `grossWeightGrams`, `netWeightGrams`, `karat`, and `schemeId`.
+- **Targeted Follow-Ups & State Retention**: If an applicant provides partial information (e.g., Sarah provides her name, mobile, gross weight, and net weight, but omits karat or repayment scheme):
+  - The assistant identifies the exact missing field(s).
+  - Asks a concise follow-up question.
+  - Preserves previously supplied details across multi-turn context.
+  - Waits for user input before proceeding.
+- **Zero Hallucination / Premature Display**: The assistant never displays an incomplete quote, raw table, or application summary card while required details are missing. Values and consent are never assumed.
+- **Schema Alignment**: The application schema and validators (`schema.prisma`, `loan.validator.ts`) were inspected. Payment method is not part of the schema or loan origination flow, so no unsupported fields were introduced.
+
+### 3. Quote Presentation Upgrade
+- Raw Markdown pipe tables have been completely removed and suppressed from the chat UI (`stripMarkdownTables` on the backend, custom markdown component suppression and clean regex on the frontend).
+- Quotes are rendered via a dedicated, institutional `QuoteSummaryCard` component featuring:
+  - Assessed gold valuation at the benchmark ₹7,000/g rate.
+  - Calculated pure gold content (24K equivalent).
+  - Scheme comparison cards with annual interest rate, tenure, max LTV, and prominent eligible loan amount.
+- All calculations remain 100% backend-authoritative (`LoanCalculatorService`); the LLM never invents loan values.
+- Explicit user confirmation is strictly required prior to application submission.
+
+### 4. Automated Test Coverage
+- Automated test suite in `backend/test/ai-assistant.test.ts` covers:
+  - Complete application details producing authoritative quotes.
+  - Missing required fields triggering concise follow-up questions.
+  - Retention of previously provided applicant details during follow-ups.
+  - Verification that incomplete inputs never produce quote tables or application summaries.
+  - Verification of schema requirements (no extraneous payment method field).
+  - Verification that model/provider branding is absent from user-facing prompts and errors.
+  - Happy path with mandatory explicit confirmation before submission.
+
+

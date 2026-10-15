@@ -4,15 +4,18 @@ import {
   ApiServiceError,
   type ChatMessage,
   type ToolExecutionRecord,
-  type ApplicationSummaryData
+  type ApplicationSummaryData,
+  type QuoteSummaryData
 } from "../../services/api.js";
 import { ApplicationConfirmationCard } from "./ApplicationConfirmationCard.js";
+import { QuoteSummaryCard } from "./QuoteSummaryCard.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 
 interface DisplayMessage extends ChatMessage {
   id: string;
   toolExecutions?: ToolExecutionRecord[];
   applicationSummary?: ApplicationSummaryData | null;
+  quoteSummary?: QuoteSummaryData | null;
   confirmationStatus?: "pending" | "confirmed" | "cancelled";
 }
 
@@ -65,17 +68,18 @@ function extractClientApplicationSummary(content: string): ApplicationSummaryDat
   const tenure = getVal("tenuremonths", "tenure");
   const loan = getVal("eligibleloanamount", "eligibleloan", "sanctionedloanamount", "loanamount");
 
-  if (name && (mobile || loan || scheme)) {
+  // Strict check: Only construct summary if ALL critical fields are actually provided in the table
+  if (name && mobile && gross && net && karat && scheme && loan) {
     return {
       fullName: name.replace(/[*_]/g, "").trim(),
-      maskedMobileNumber: (mobile || "9876XXXX10").replace(/[*_]/g, "").trim(),
-      grossWeightGrams: parseFloat(gross?.replace(/[^0-9.]/g, "") || "0") || 50,
-      netWeightGrams: parseFloat(net?.replace(/[^0-9.]/g, "") || "0") || 45,
-      karat: parseInt(karat?.replace(/[^0-9]/g, "") || "22", 10) || 22,
-      schemeName: scheme ? scheme.replace(/[*_]/g, "").trim() : "Bullet Repayment",
+      maskedMobileNumber: mobile.replace(/[*_]/g, "").trim(),
+      grossWeightGrams: parseFloat(gross?.replace(/[^0-9.]/g, "") || "0"),
+      netWeightGrams: parseFloat(net?.replace(/[^0-9.]/g, "") || "0"),
+      karat: parseInt(karat?.replace(/[^0-9]/g, "") || "22", 10),
+      schemeName: scheme.replace(/[*_]/g, "").trim(),
       annualInterestRate: parseFloat(rate?.replace(/[^0-9.]/g, "") || "12"),
-      tenureMonths: parseInt(tenure?.replace(/[^0-9]/g, "") || "12", 10) || 12,
-      eligibleLoan: parseFloat(loan?.replace(/[^0-9.]/g, "") || "0") || 0
+      tenureMonths: parseInt(tenure?.replace(/[^0-9]/g, "") || "12", 10),
+      eligibleLoan: parseFloat(loan?.replace(/[^0-9.]/g, "") || "0")
     };
   }
   return null;
@@ -83,7 +87,7 @@ function extractClientApplicationSummary(content: string): ApplicationSummaryDat
 
 function cleanContentText(content: string): string {
   if (!content) return "";
-  const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/;
+  const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/g;
   return content.replace(tableRegex, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -164,6 +168,7 @@ export const AiAssistantChat: React.FC = () => {
         content: response.message,
         toolExecutions: response.toolExecutions,
         applicationSummary: response.applicationSummary || null,
+        quoteSummary: response.quoteSummary || null,
         confirmationStatus: response.applicationSummary ? "pending" : undefined
       };
 
@@ -268,8 +273,8 @@ export const AiAssistantChat: React.FC = () => {
               <div>
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-sm font-bold text-white">Goldie AI</h3>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                    Groq 120B
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    Loan Assistant
                   </span>
                 </div>
                 <span className="text-[11px] text-emerald-400 flex items-center gap-1">
@@ -304,7 +309,7 @@ export const AiAssistantChat: React.FC = () => {
             {messages.map((m) => {
               const isUser = m.role === "user";
               const summary = m.applicationSummary || (!isUser ? extractClientApplicationSummary(m.content) : null);
-              const displayContent = summary ? cleanContentText(m.content) : m.content;
+              const displayContent = cleanContentText(m.content);
 
               return (
                 <div
@@ -321,6 +326,9 @@ export const AiAssistantChat: React.FC = () => {
                     {/* Conversational Message Content */}
                     {displayContent && <MarkdownContent content={displayContent} />}
 
+                    {/* Structured Quote Summary Card Component */}
+                    {m.quoteSummary && <QuoteSummaryCard quote={m.quoteSummary} />}
+
                     {/* Structured Application Confirmation Card Component */}
                     {summary && (
                       <ApplicationConfirmationCard
@@ -332,46 +340,15 @@ export const AiAssistantChat: React.FC = () => {
                       />
                     )}
 
-                    {/* Render tool execution results if present */}
+                    {/* Render tool execution status badges if present */}
                     {m.toolExecutions && m.toolExecutions.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
                         {m.toolExecutions.map((te, idx) => {
                           const result = te.result as Record<string, unknown> | undefined;
 
-                          if (te.toolName === "calculate_quote" && result?.quote) {
-                            const q = result.quote as {
-                              pureGoldGrams: number;
-                              goldValue: number;
-                              schemes: Array<{
-                                name: string;
-                                eligibleLoan: number;
-                                annualInterestRate: number;
-                              }>;
-                            };
-                            return (
-                              <div
-                                key={idx}
-                                className="p-2.5 rounded-xl bg-slate-900 border border-amber-500/30 space-y-1.5 text-[11px]"
-                              >
-                                <div className="font-semibold text-amber-400 flex items-center justify-between">
-                                  <span>Gold Valuation</span>
-                                  <span>₹{q.goldValue.toLocaleString("en-IN")}</span>
-                                </div>
-                                <div className="text-[10px] text-slate-400">
-                                  Pure 24K Content: {q.pureGoldGrams.toFixed(2)}g
-                                </div>
-                                <div className="space-y-1 pt-1 border-t border-slate-800">
-                                  {q.schemes.map((s, sIdx) => (
-                                    <div key={sIdx} className="flex justify-between text-slate-300">
-                                      <span>{s.name} ({s.annualInterestRate}%):</span>
-                                      <span className="font-bold text-emerald-400">
-                                        ₹{s.eligibleLoan.toLocaleString("en-IN")}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            );
+                          if (te.toolName === "calculate_quote") {
+                            // Rendered prominently above via QuoteSummaryCard
+                            return null;
                           }
 
                           if (te.toolName === "submit_application" && result?.application) {

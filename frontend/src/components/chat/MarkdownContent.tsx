@@ -57,6 +57,12 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content }) => 
           );
         }
 
+        // Check if block is a raw pipe table (suppress in favor of structured UI cards)
+        const isTable = lines.length >= 2 && lines.every((line) => line.trim().startsWith("|") && line.trim().endsWith("|"));
+        if (isTable) {
+          return null;
+        }
+
         // Paragraph with line breaks
         return (
           <p key={bIdx} className="leading-relaxed">

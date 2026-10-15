@@ -139,10 +139,30 @@ export interface ApplicationSummaryData {
   eligibleLoan: number;
 }
 
+export interface QuoteSchemeData {
+  code: string;
+  name: string;
+  annualInterestRate: number;
+  tenureMonths: number;
+  maxLtv: number;
+  eligibleLoan: number;
+}
+
+export interface QuoteSummaryData {
+  grossWeightGrams: number;
+  netWeightGrams: number;
+  karat: number;
+  pureGoldGrams: number;
+  goldValue: number;
+  rate24kPerGram?: number;
+  schemes: QuoteSchemeData[];
+}
+
 export interface AssistantChatResponse {
   message: string;
   toolExecutions: ToolExecutionRecord[];
   applicationSummary?: ApplicationSummaryData | null;
+  quoteSummary?: QuoteSummaryData | null;
 }
 
 export async function sendAssistantChat(

@@ -10,6 +10,7 @@ import type { ChatMessage } from "../validators/ai.validator.js";
 
 export const SYSTEM_PROMPT = `You are "Goldie", the institutional AI Gold Loan Assistant for AuLoanDesk by TGlobal Technologies.
 Your sole purpose is to assist customers with gold loan inquiries, explain loan schemes, calculate authoritative quotes, and submit loan applications upon explicit user confirmation.
+Never refer to yourself as GPT, Groq, 120B, or any underlying model or provider. Your identity is simply Goldie, the institutional Gold Loan Assistant.
 
 CRITICAL OPERATIONAL RULES & GUARDRAILS:
 1. NON-AUTHORITATIVE CALCULATIONS:
@@ -21,17 +22,50 @@ CRITICAL OPERATIONAL RULES & GUARDRAILS:
    - Only describe loan schemes returned by "get_loan_schemes".
    - Never invent or describe schemes that are not present in the database.
 
-3. MANDATORY CONFIRMATION BEFORE SUBMISSION:
-   - You must NEVER call "submit_application" without explicit user confirmation.
-   - Before submission, you MUST present a complete Application Summary containing:
-     * Full Legal Name
-     * Masked Mobile Number (format: 9876XXXX10)
-     * Gross Weight & Net Gold Weight
-     * Karat (18K, 22K, or 24K)
-     * Selected Scheme Name & Interest Rate
-     * Tenure in Months
-     * Sanctioned / Eligible Loan Amount
-   - You must format this summary using an \`\`\`application-summary JSON block:
+3. MISSING DETAILS & MANDATORY COLLECTION PROTOCOL:
+   - REQUIRED FIELDS FOR A QUOTE:
+     To generate a quote (calling "calculate_quote"), you MUST have ALL 3 gold parameters:
+     * Gross physical weight (in grams, > 0 and <= 1000g)
+     * Net gold weight (in grams, > 0 and <= grossWeightGrams)
+     * Karat purity (18, 22, or 24)
+     IF ANY of these 3 parameters is missing:
+     * You MUST NOT call "calculate_quote".
+     * You MUST NOT guess, default, or fabricate values.
+     * You MUST NOT display an incomplete quote or raw table.
+     * Acknowledge the details provided so far and ask a concise follow-up question specifically for the missing gold parameter(s).
+     * Wait for the user's answer before proceeding.
+
+   - REQUIRED FIELDS FOR AN APPLICATION & APPLICATION SUMMARY:
+     To prepare an application and present an Application Summary, you MUST have ALL 6 required application details:
+     * Full Legal Name (letters & spaces, 2-60 characters)
+     * 10-digit Indian Mobile Number (starting with 6, 7, 8, or 9)
+     * Gross Weight (in grams)
+     * Net Gold Weight (in grams)
+     * Karat (18, 22, or 24)
+     * Selected Repayment Scheme (Bullet Repayment / "PLAN_BULLET_01" or Monthly EMI / "PLAN_EMI_01")
+     (Note: Payment method is not part of the AuLoanDesk schema and is not required).
+
+     IF ANY of these 6 fields is missing (for example: applicant provides name, mobile, gross weight, net weight, but misses karat or misses repayment scheme):
+     * You MUST NOT display an Application Summary (do NOT emit \`\`\`application-summary block).
+     * You MUST NOT display an incomplete quote or raw table.
+     * You MUST NOT call "submit_application".
+     * You MUST NOT invent values or assume user consent.
+     * You MUST preserve all details the applicant has already provided.
+     * You MUST identify the missing field(s) and ask a concise follow-up question.
+     * You MUST wait for their answer before proceeding.
+
+   - RETENTION OF PREVIOUSLY SUPPLIED DETAILS:
+     When the applicant answers your follow-up question with the missing field(s), you MUST retain all previously supplied details from earlier turns in the conversation. Never ask the applicant to re-enter information they already gave you.
+
+4. CLEAN QUOTE PRESENTATION (NO RAW PIPE TABLES):
+   - When presenting quotes:
+     * You MUST NEVER output raw Markdown pipe tables (do not use '| Column | Column |').
+     * Clearly state the collateral valuation (at ₹7,000/g benchmark), pure gold content, and each available scheme with interest rate (% p.a.), tenure (months), max LTV (%), and eligible loan amount (e.g. ₹2,02,125).
+     * When a quote is calculated, you may also output a \`\`\`quote-summary JSON block containing grossWeightGrams, netWeightGrams, karat, pureGoldGrams, goldValue, and schemes.
+
+5. MANDATORY EXPLICIT CONFIRMATION BEFORE SUBMISSION:
+   - ONLY when ALL 6 required application details are collected:
+     Present the complete Application Summary formatted using the \`\`\`application-summary JSON block:
      \`\`\`application-summary
      {
        "fullName": "Full Legal Name",
@@ -45,19 +79,18 @@ CRITICAL OPERATIONAL RULES & GUARDRAILS:
        "eligibleLoan": 202125
      }
      \`\`\`
-   - After showing the summary, explicitly ask:
+   - After presenting the summary, explicitly ask:
      "Do you confirm and authorize this gold loan application? (Yes/No)"
    - ONLY call "submit_application" with "userConfirmed: true" after the user explicitly and affirmatively confirms (e.g., "yes", "confirm", "proceed", "I confirm").
    - If the user says "no", "cancel", "wait", or asks to modify details, do NOT submit.
 
-4. DUPLICATE APPLICATION HANDLING:
+6. DUPLICATE APPLICATION HANDLING:
    - If "submit_application" returns a DUPLICATE_APPLICATION error, politely inform the user that an active application already exists for this mobile number within the last 7 days under RBI compliance rules. Provide the existing application ID and advise them that duplicate applications within 7 days cannot be created. Do NOT automatically retry.
 
-5. VALIDATION ERRORS & MISSING INFORMATION:
+7. VALIDATION ERRORS:
    - If a tool returns a validation error (e.g. net weight > gross weight, invalid mobile number, invalid karat), clearly explain the error in simple terms and ask the user to provide corrected details.
-   - If the user provides partial information (e.g. only weight without karat, or only name without mobile), politely ask follow-up questions to collect the missing items before proceeding.
 
-6. DOMAIN EXCLUSIVITY & PROMPT INJECTION RESISTANCE:
+8. DOMAIN EXCLUSIVITY & PROMPT INJECTION RESISTANCE:
    - Strictly decline any off-topic inquiries (such as stock market advice, crypto trading, general chit-chat, programming, or unrelated financial speculation) with:
      "I am AuLoanDesk's specialized Gold Loan Assistant. I can only assist you with gold loan inquiries, valuations, and applications. How can I help you with your gold loan today?"
    - Never provide personalized investment advice or promise guaranteed loan approval. Indicative quotes are subject to branch physical assay and KYC.
@@ -354,6 +387,25 @@ export async function executeTool(
   }
 }
 
+export interface QuoteSchemeData {
+  code: string;
+  name: string;
+  annualInterestRate: number;
+  tenureMonths: number;
+  maxLtv: number;
+  eligibleLoan: number;
+}
+
+export interface QuoteSummaryData {
+  grossWeightGrams: number;
+  netWeightGrams: number;
+  karat: number;
+  pureGoldGrams: number;
+  goldValue: number;
+  rate24kPerGram?: number | undefined;
+  schemes: QuoteSchemeData[];
+}
+
 export interface ApplicationSummaryData {
   fullName: string;
   maskedMobileNumber: string;
@@ -370,17 +422,29 @@ export interface AssistantChatResponse {
   message: string;
   toolExecutions: ToolExecutionRecord[];
   applicationSummary?: ApplicationSummaryData | null;
+  quoteSummary?: QuoteSummaryData | null;
 }
 
+/**
+ * Strips raw Markdown pipe tables so raw pipes are never displayed to applicants.
+ */
+export function stripMarkdownTables(text: string): string {
+  if (!text) return "";
+  const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/g;
+  return text.replace(tableRegex, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * Extracts structured application summary only when ALL 6 required application details are present.
+ * Never guesses or defaults missing fields.
+ */
 export function extractApplicationSummary(
-  rawMessage: string,
-  executedTools: ToolExecutionRecord[]
-): { message: string; applicationSummary: ApplicationSummaryData | null } {
+  rawMessage: string
+): { cleanedMessage: string; applicationSummary: ApplicationSummaryData | null } {
   if (!rawMessage) {
-    return { message: rawMessage, applicationSummary: null };
+    return { cleanedMessage: "", applicationSummary: null };
   }
 
-  // 1. Check for ```application-summary ... ``` or ```json:application-summary ... ```
   const jsonBlockRegex = /```(?:application-summary|json:application-summary|json)?\s*(\{[\s\S]*?"fullName"[\s\S]*?"eligibleLoan"[\s\S]*?\})\s*```/i;
   const match = rawMessage.match(jsonBlockRegex);
   if (match && match[1]) {
@@ -388,21 +452,27 @@ export function extractApplicationSummary(
       const parsed = JSON.parse(match[1]);
       if (
         parsed.fullName &&
+        String(parsed.fullName).trim().length >= 2 &&
         parsed.maskedMobileNumber &&
+        String(parsed.maskedMobileNumber).trim().length >= 8 &&
         parsed.grossWeightGrams !== undefined &&
+        Number(parsed.grossWeightGrams) > 0 &&
         parsed.netWeightGrams !== undefined &&
+        Number(parsed.netWeightGrams) > 0 &&
         parsed.karat !== undefined &&
+        [18, 22, 24].includes(Number(parsed.karat)) &&
         parsed.schemeName &&
+        String(parsed.schemeName).trim().length >= 2 &&
         parsed.annualInterestRate !== undefined &&
+        Number(parsed.annualInterestRate) > 0 &&
         parsed.tenureMonths !== undefined &&
-        parsed.eligibleLoan !== undefined
+        Number(parsed.tenureMonths) > 0 &&
+        parsed.eligibleLoan !== undefined &&
+        Number(parsed.eligibleLoan) > 0
       ) {
-        const cleanedMessage = rawMessage
-          .replace(match[0], "")
-          .replace(/\n{3,}/g, "\n\n")
-          .trim();
+        const cleaned = rawMessage.replace(match[0], "").trim();
         return {
-          message: cleanedMessage || "Please review your gold loan application summary below:",
+          cleanedMessage: cleaned,
           applicationSummary: {
             fullName: String(parsed.fullName).trim(),
             maskedMobileNumber: String(parsed.maskedMobileNumber).trim(),
@@ -417,88 +487,115 @@ export function extractApplicationSummary(
         };
       }
     } catch {
-      // Fall through to table fallback
+      // Invalid JSON block
     }
   }
 
-  // 2. Fallback: Check for markdown table representation
-  const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/;
-  const tableMatch = rawMessage.match(tableRegex);
-  if (tableMatch) {
-    const tableText = tableMatch[0];
-    const lines = tableText.split(/\r?\n/).filter((l) => l.trim().startsWith("|"));
-    const fields: Record<string, string> = {};
+  return { cleanedMessage: rawMessage, applicationSummary: null };
+}
 
-    for (const line of lines) {
-      const cells = line
-        .split("|")
-        .map((c) => c.trim())
-        .filter((c) => c.length > 0);
-      if (cells.length >= 2 && cells[0] && cells[1]) {
-        const key = cells[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-        const val = cells[1];
-        if (key && !key.includes("---") && key !== "field" && key !== "parameter") {
-          fields[key] = val;
-        }
-      }
-    }
+/**
+ * Extracts authoritative quote summary from successful calculate_quote tool executions
+ * or structured quote-summary block. Returns null if inputs were incomplete.
+ */
+export function extractQuoteSummary(
+  rawMessage: string,
+  executedTools: ToolExecutionRecord[]
+): { cleanedMessage: string; quoteSummary: QuoteSummaryData | null } {
+  // 1. Authoritative: Derive directly from backend calculate_quote tool execution
+  const quoteTool = executedTools.find(
+    (t) => t.toolName === "calculate_quote" && (t.result as { success?: boolean })?.success
+  );
 
-    const getVal = (...keys: string[]): string | undefined => {
-      for (const k of keys) {
-        if (fields[k]) return fields[k];
-        for (const fKey of Object.keys(fields)) {
-          if (fKey.includes(k)) return fields[fKey];
-        }
-      }
-      return undefined;
-    };
+  let quoteSummary: QuoteSummaryData | null = null;
 
-    const name = getVal("fullname", "legalname", "applicantname", "applicant");
-    const mobile = getVal("maskedmobilenumber", "mobilenumber", "maskedmobile", "mobile", "phone");
-    const gross = getVal("grossweight", "grossweightgrams", "gross");
-    const net = getVal("netgoldweight", "netweight", "netweightgrams", "net");
-    const karat = getVal("karat", "goldpurity", "purity");
-    const scheme = getVal("selectedscheme", "schemename", "scheme", "plan");
-    const rate = getVal("annualinterestrate", "interestrate", "rate", "interest");
-    const tenure = getVal("tenuremonths", "tenure", "duration");
-    const loan = getVal("eligibleloanamount", "eligibleloan", "sanctionedloanamount", "loanamount", "sanction");
-
-    if (name && (mobile || loan || scheme)) {
-      const quoteTool = executedTools.find(
-        (t) => t.toolName === "calculate_quote" && (t.result as Record<string, unknown>)?.success
-      );
-      const quoteResult = (quoteTool?.result as { quote?: { schemes: Array<{ name: string; annualInterestRate: number; tenureMonths: number; eligibleLoan: number }> } })?.quote;
-
-      const numGross = parseFloat(gross?.replace(/[^0-9.]/g, "") || "0");
-      const numNet = parseFloat(net?.replace(/[^0-9.]/g, "") || "0");
-      const numKarat = parseInt(karat?.replace(/[^0-9]/g, "") || "22", 10);
-      const numRate = parseFloat(rate?.replace(/[^0-9.]/g, "") || "12");
-      const numTenure = parseInt(tenure?.replace(/[^0-9]/g, "") || "12", 10);
-      const numLoan = parseFloat(loan?.replace(/[^0-9.]/g, "") || "0");
-
-      const cleanedMessage = rawMessage
-        .replace(tableText, "")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-
-      return {
-        message: cleanedMessage || "Please review your gold loan application summary below:",
-        applicationSummary: {
-          fullName: name.replace(/[*_]/g, "").trim(),
-          maskedMobileNumber: (mobile || "9876XXXX10").replace(/[*_]/g, "").trim(),
-          grossWeightGrams: numGross || Number(quoteTool?.args?.grossWeightGrams) || 50,
-          netWeightGrams: numNet || Number(quoteTool?.args?.netWeightGrams) || 45,
-          karat: [18, 22, 24].includes(numKarat) ? numKarat : (Number(quoteTool?.args?.karat) || 22),
-          schemeName: scheme ? scheme.replace(/[*_]/g, "").trim() : (quoteResult?.schemes?.[0]?.name || "Bullet Repayment"),
-          annualInterestRate: numRate || quoteResult?.schemes?.[0]?.annualInterestRate || 12,
-          tenureMonths: numTenure || quoteResult?.schemes?.[0]?.tenureMonths || 12,
-          eligibleLoan: numLoan || quoteResult?.schemes?.[0]?.eligibleLoan || 0
-        }
+  if (quoteTool && (quoteTool.result as { quote?: unknown })?.quote) {
+    const q = (quoteTool.result as { quote: QuoteSummaryData }).quote;
+    if (q && q.goldValue > 0 && Array.isArray(q.schemes) && q.schemes.length > 0) {
+      quoteSummary = {
+        grossWeightGrams: q.grossWeightGrams,
+        netWeightGrams: q.netWeightGrams,
+        karat: q.karat,
+        pureGoldGrams: q.pureGoldGrams,
+        goldValue: q.goldValue,
+        rate24kPerGram: q.rate24kPerGram,
+        schemes: q.schemes.map((s) => ({
+          code: s.code,
+          name: s.name,
+          annualInterestRate: s.annualInterestRate,
+          tenureMonths: s.tenureMonths,
+          maxLtv: s.maxLtv,
+          eligibleLoan: s.eligibleLoan
+        }))
       };
     }
   }
 
-  return { message: rawMessage, applicationSummary: null };
+  // 2. Check for optional ```quote-summary JSON block in message text
+  const quoteBlockRegex = /```(?:quote-summary|json:quote-summary)\s*(\{[\s\S]*?"goldValue"[\s\S]*?"schemes"[\s\S]*?\})\s*```/i;
+  const match = rawMessage.match(quoteBlockRegex);
+  let cleanedMessage = rawMessage;
+
+  if (match && match[1]) {
+    try {
+      if (!quoteSummary) {
+        const parsed = JSON.parse(match[1]);
+        if (parsed.goldValue > 0 && Array.isArray(parsed.schemes) && parsed.schemes.length > 0) {
+          quoteSummary = {
+            grossWeightGrams: Number(parsed.grossWeightGrams),
+            netWeightGrams: Number(parsed.netWeightGrams),
+            karat: Number(parsed.karat),
+            pureGoldGrams: Number(parsed.pureGoldGrams),
+            goldValue: Number(parsed.goldValue),
+            rate24kPerGram: parsed.rate24kPerGram ? Number(parsed.rate24kPerGram) : undefined,
+            schemes: parsed.schemes.map((s: QuoteSchemeData) => ({
+              code: String(s.code),
+              name: String(s.name),
+              annualInterestRate: Number(s.annualInterestRate),
+              tenureMonths: Number(s.tenureMonths),
+              maxLtv: Number(s.maxLtv),
+              eligibleLoan: Number(s.eligibleLoan)
+            }))
+          };
+        }
+      }
+    } catch {
+      // Ignore parse failure
+    }
+    cleanedMessage = rawMessage.replace(match[0], "").trim();
+  }
+
+  return { cleanedMessage, quoteSummary };
+}
+
+/**
+ * Combines summary extraction and cleans raw Markdown pipe tables and JSON blocks.
+ */
+export function extractChatSummaries(
+  rawMessage: string,
+  executedTools: ToolExecutionRecord[]
+): {
+  message: string;
+  applicationSummary: ApplicationSummaryData | null;
+  quoteSummary: QuoteSummaryData | null;
+} {
+  const { cleanedMessage: msgAfterApp, applicationSummary } = extractApplicationSummary(rawMessage);
+  const { cleanedMessage: msgAfterQuote, quoteSummary } = extractQuoteSummary(msgAfterApp, executedTools);
+
+  // Clean raw Markdown pipe tables so raw pipes are never presented as unformatted text
+  let finalMessage = stripMarkdownTables(msgAfterQuote);
+
+  if (!finalMessage && (applicationSummary || quoteSummary)) {
+    finalMessage = applicationSummary
+      ? "Please review your gold loan application summary below:"
+      : "Here is your indicative gold loan quote:";
+  }
+
+  return {
+    message: finalMessage || "How can I assist you with your gold loan today?",
+    applicationSummary,
+    quoteSummary
+  };
 }
 
 export async function chatWithAssistant(
@@ -508,7 +605,7 @@ export async function chatWithAssistant(
   if (!apiKey) {
     throw new AppError(
       503,
-      "Groq API key is not configured on the backend. Please check GROQ_API_KEY in backend/.env",
+      "AI assistant service is not configured on the backend. Please check system configuration.",
       "AI_SERVICE_UNAVAILABLE"
     );
   }
@@ -545,27 +642,27 @@ export async function chatWithAssistant(
       if (errorObj?.status === 429) {
         throw new AppError(
           429,
-          "The AI Assistant is currently experiencing high demand from Groq rate limits. Please try again shortly.",
+          "The AI Assistant is currently experiencing high demand. Please try again shortly.",
           "RATE_LIMIT_EXCEEDED"
         );
       }
       if (errorObj?.status === 404 || errorObj?.message?.includes("model")) {
         throw new AppError(
           502,
-          `The configured Groq model (${model}) is currently unavailable. Please verify model ID.`,
+          "The AI assistant service is temporarily unavailable. Please try again shortly.",
           "MODEL_UNAVAILABLE"
         );
       }
       throw new AppError(
         502,
-        `Groq AI Service error: ${errorObj?.message || "Failed to communicate with LLM API"}`,
+        `AI Service error: ${errorObj?.message || "Failed to communicate with assistant service"}`,
         "LLM_API_ERROR"
       );
     }
 
     const choice = completion.choices[0];
     if (!choice || !choice.message) {
-      throw new AppError(500, "Empty response received from Groq AI model.", "LLM_EMPTY_RESPONSE");
+      throw new AppError(500, "Empty response received from AI assistant.", "LLM_EMPTY_RESPONSE");
     }
 
     const assistantMsg = choice.message;
@@ -599,18 +696,22 @@ export async function chatWithAssistant(
     } else {
       // Model responded with final text
       const rawText = assistantMsg.content || "I am here to help you with your gold loan. How can I assist you?";
-      const { message: finalMessage, applicationSummary } = extractApplicationSummary(rawText, executedTools);
+      const { message: finalMessage, applicationSummary, quoteSummary } = extractChatSummaries(
+        rawText,
+        executedTools
+      );
 
       return {
         message: finalMessage,
         toolExecutions: executedTools,
-        applicationSummary
+        applicationSummary,
+        quoteSummary
       };
     }
   }
 
   // If loop exhausted
-  const { message: finalMessage, applicationSummary } = extractApplicationSummary(
+  const { message: finalMessage, applicationSummary, quoteSummary } = extractChatSummaries(
     "I processed your request, but the operation took too many conversational turns. Please review your details and confirm.",
     executedTools
   );
@@ -618,6 +719,7 @@ export async function chatWithAssistant(
   return {
     message: finalMessage,
     toolExecutions: executedTools,
-    applicationSummary
+    applicationSummary,
+    quoteSummary
   };
 }

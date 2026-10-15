@@ -503,5 +503,288 @@ describe("Phase 5: AI Loan Assistant Services and Tool Calling", () => {
       expect(res.body.data.message).not.toContain("```application-summary");
       expect(res.body.data.message).toContain("Do you confirm");
     });
+
+    it("returns structured quoteSummary data in API response when calculate_quote tool succeeds", async () => {
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_q_api",
+                  type: "function",
+                  function: {
+                    name: "calculate_quote",
+                    arguments: JSON.stringify({
+                      grossWeightGrams: 50,
+                      netWeightGrams: 45,
+                      karat: 22
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      });
+
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "Your 45g 22K gold has an assessed valuation of ₹2,88,750. You are eligible for up to ₹2,16,562 under Monthly EMI and ₹2,02,125 under Bullet Repayment."
+            }
+          }
+        ]
+      });
+
+      const res = await request(app)
+        .post("/api/v1/assistant/chat")
+        .send({
+          messages: [{ role: "user", content: "What is my quote for 50g gross, 45g net, 22K gold?" }]
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.quoteSummary).toBeDefined();
+      expect(res.body.data.quoteSummary.goldValue).toBe(288750);
+      expect(res.body.data.quoteSummary.schemes.length).toBeGreaterThanOrEqual(2);
+      expect(res.body.data.applicationSummary).toBeNull();
+    });
+  });
+
+  // ==========================================
+  // 4. Conversation Flow Hardening Tests
+  // ==========================================
+  describe("Conversation Flow Hardening & Missing Details", () => {
+    it("Complete application details produce a valid quote", async () => {
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_quote_complete",
+                  type: "function",
+                  function: {
+                    name: "calculate_quote",
+                    arguments: JSON.stringify({
+                      grossWeightGrams: 50,
+                      netWeightGrams: 45,
+                      karat: 22
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      });
+
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content:
+                "Your 45g (22K) gold is valued at ₹2,88,750. You can borrow up to ₹2,02,125 under Bullet Repayment (12% p.a.) or ₹2,16,562 under Monthly EMI (10.5% p.a.)."
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        {
+          role: "user",
+          content: "Calculate quote for 50g gross and 45g net with 22K gold."
+        }
+      ]);
+
+      expect(response.quoteSummary).toBeDefined();
+      expect(response.quoteSummary?.goldValue).toBe(288750);
+      expect(response.quoteSummary?.pureGoldGrams).toBeCloseTo(41.25, 2);
+      expect(response.quoteSummary?.schemes.length).toBeGreaterThanOrEqual(2);
+      expect(response.applicationSummary).toBeNull();
+    });
+
+    it("Missing required fields trigger follow-up questions without premature tool calls or quotes", async () => {
+      // Sarah provides name, mobile, gross, net, but misses karat and scheme
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content:
+                "Hello Sarah! I have noted your details: 50g gross weight and 45g net gold weight.\n\nTo calculate your accurate loan quote and prepare your application, could you please provide:\n1. What is the gold purity (18K, 22K, or 24K)?\n2. Which repayment scheme do you prefer (Bullet Repayment at 12% p.a. or Monthly EMI at 10.5% p.a.)?"
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        {
+          role: "user",
+          content: "My name is Sarah, mobile 9876543210, I have 50g gross and 45g net gold."
+        }
+      ]);
+
+      // No tools called because required fields are incomplete
+      expect(response.toolExecutions.length).toBe(0);
+      expect(response.quoteSummary).toBeNull();
+      expect(response.applicationSummary).toBeNull();
+      expect(response.message).toContain("purity");
+      expect(response.message).toContain("repayment scheme");
+    });
+
+    it("Schema requirement check: Payment method is not part of existing schema and not required", async () => {
+      // Inspect createLead validator: verify paymentMethod is NOT in schema
+      const { createLeadSchema } = await import("../src/validators/loan.validator.js");
+      const shape = createLeadSchema.shape;
+      expect("paymentMethod" in shape).toBe(false);
+
+      // Verify required fields in schema
+      expect("fullName" in shape).toBe(true);
+      expect("mobileNumber" in shape).toBe(true);
+      expect("grossWeightGrams" in shape).toBe(true);
+      expect("netWeightGrams" in shape).toBe(true);
+      expect("karat" in shape).toBe(true);
+      expect("schemeId" in shape).toBe(true);
+    });
+
+    it("Incomplete details never produce a quote table or application summary", async () => {
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content:
+                "| Field | Value |\n| --- | --- |\n| Status | Incomplete |\n\nPlease provide your gold purity to proceed."
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        {
+          role: "user",
+          content: "I have 30g gold."
+        }
+      ]);
+
+      // Verify no quoteSummary or applicationSummary generated for incomplete details
+      expect(response.quoteSummary).toBeNull();
+      expect(response.applicationSummary).toBeNull();
+
+      // Verify raw pipe table was cleanly stripped from message
+      expect(response.message).not.toContain("| Field | Value |");
+      expect(response.message).toContain("Please provide your gold purity");
+    });
+
+    it("Previously supplied details are retained during follow-up questions", async () => {
+      // Turn 1: Sarah gave name, mobile, gross, net
+      // Turn 2: Sarah supplies missing karat (22K) and scheme (Bullet Repayment)
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_quote_sarah",
+                  type: "function",
+                  function: {
+                    name: "calculate_quote",
+                    arguments: JSON.stringify({
+                      grossWeightGrams: 50,
+                      netWeightGrams: 45,
+                      karat: 22
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      });
+
+      const summaryJson = JSON.stringify({
+        fullName: "Sarah",
+        maskedMobileNumber: "9876XXXX10",
+        grossWeightGrams: 50,
+        netWeightGrams: 45,
+        karat: 22,
+        schemeName: "Bullet Repayment",
+        annualInterestRate: 12,
+        tenureMonths: 12,
+        eligibleLoan: 202125
+      });
+
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: `Thank you Sarah. Here is your application summary:\n\`\`\`application-summary\n${summaryJson}\n\`\`\`\nDo you confirm and authorize this gold loan application? (Yes/No)`
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        {
+          role: "user",
+          content: "My name is Sarah, mobile 9876543210, I have 50g gross and 45g net gold."
+        },
+        {
+          role: "assistant",
+          content: "What is your gold purity and preferred repayment scheme?"
+        },
+        {
+          role: "user",
+          content: "It is 22K and I want Bullet Repayment."
+        }
+      ]);
+
+      // Retained Sarah's previously supplied details without re-asking
+      expect(response.applicationSummary).toBeDefined();
+      expect(response.applicationSummary?.fullName).toBe("Sarah");
+      expect(response.applicationSummary?.maskedMobileNumber).toBe("9876XXXX10");
+      expect(response.applicationSummary?.grossWeightGrams).toBe(50);
+      expect(response.applicationSummary?.netWeightGrams).toBe(45);
+      expect(response.applicationSummary?.karat).toBe(22);
+      expect(response.applicationSummary?.schemeName).toBe("Bullet Repayment");
+      expect(response.applicationSummary?.eligibleLoan).toBe(202125);
+    });
+
+    it("Model and provider branding do not appear in user-facing message text", async () => {
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "Hello! I am Goldie, your institutional Gold Loan Assistant. How can I assist you with your gold loan inquiry today?"
+            }
+          }
+        ]
+      });
+
+      const response = await chatWithAssistant([
+        { role: "user", content: "Who are you?" }
+      ]);
+
+      const lower = response.message.toLowerCase();
+      expect(lower).not.toContain("groq");
+      expect(lower).not.toContain("120b");
+      expect(lower).not.toContain("gpt-oss");
+      expect(lower).not.toContain("openai");
+      expect(response.message).toContain("Goldie");
+    });
   });
 });
+

@@ -124,7 +124,7 @@ npm run dev
 ## Testing & Quality Verification
 
 ### Run Backend Tests (Vitest)
-Executes 57 unit, financial, API, B1 concurrency & hardening, and mocked Groq AI conversation tests:
+Executes 64 unit, financial, API, B1 concurrency & hardening, and conversational AI flow tests:
 ```bash
 cd backend
 npm run test
