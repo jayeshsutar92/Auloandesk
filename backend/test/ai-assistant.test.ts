@@ -955,6 +955,128 @@ describe("Phase 5: AI Loan Assistant Services and Tool Calling", () => {
       expect(response.applicationSummary).toBeNull();
       expect(response.message).toContain("cancelled this loan application");
     });
+
+    it("Regression: after clicking Confirm Application and successful submission, repeated confirmation message ('Yes, I confirm and authorize this gold loan application') is handled exactly once, persists submitted state, does not re-render pending confirmation card or re-submit", async () => {
+      const regMobile = `${TEST_AI_MOBILE_PREFIX}099`;
+
+      // Step 1: Initial user confirmation ("Yes, I confirm and authorize this gold loan application.")
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_submit_reg_1",
+                  type: "function",
+                  function: {
+                    name: "submit_application",
+                    arguments: JSON.stringify({
+                      fullName: "Sarah Jenkins",
+                      mobileNumber: regMobile,
+                      grossWeightGrams: 50,
+                      netWeightGrams: 45,
+                      karat: 22,
+                      schemeId: bulletSchemeId || "PLAN_BULLET_01",
+                      userConfirmed: true
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      });
+
+      mockGroqChatCreate.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content:
+                "Please review your gold loan application summary below:\n\nDo you confirm and authorize this gold loan application? (Yes/No)\n\nYour gold loan application has been successfully submitted!"
+            }
+          }
+        ]
+      });
+
+      const firstResponse = await chatWithAssistant([
+        {
+          role: "assistant",
+          content:
+            "Here is your gold loan application summary:\n```application-summary\n{\n  \"fullName\": \"Sarah Jenkins\",\n  \"maskedMobileNumber\": \"9876XXXX88\",\n  \"grossWeightGrams\": 50,\n  \"netWeightGrams\": 45,\n  \"karat\": 22,\n  \"schemeName\": \"Bullet Repayment\",\n  \"annualInterestRate\": 12,\n  \"tenureMonths\": 12,\n  \"eligibleLoan\": 202125\n}\n```\n\nDo you confirm and authorize this gold loan application? (Yes/No)"
+        },
+        {
+          role: "user",
+          content: "Yes, I confirm and authorize this gold loan application."
+        }
+      ]);
+
+      expect(firstResponse.toolExecutions.length).toBe(1);
+      expect(firstResponse.submittedApplication).toBeDefined();
+      expect(firstResponse.submittedApplication?.status).toBe("SUBMITTED");
+      expect(firstResponse.submittedApplication?.applicationNumber).toMatch(/^ALD-/);
+      expect(firstResponse.applicationSummary).toBeNull(); // No pending confirmation card
+      expect(firstResponse.message).toContain(firstResponse.submittedApplication?.applicationNumber);
+      expect(firstResponse.message).toContain("SUBMITTED");
+      expect(firstResponse.message).not.toContain("Do you confirm and authorize");
+      expect(firstResponse.message).not.toContain("Please review your gold loan application summary");
+
+      const submittedAppNumber = firstResponse.submittedApplication!.applicationNumber;
+      const submittedAppId = firstResponse.submittedApplication!.id;
+
+      // Step 2: User subsequently sends the same confirmation text again in the conversation
+      const repeatedResponse = await chatWithAssistant([
+        {
+          role: "assistant",
+          content: firstResponse.message
+        },
+        {
+          role: "user",
+          content: "Yes, I confirm and authorize this gold loan application."
+        }
+      ]);
+
+      // Handled exactly once: no repeated tool execution, no DB collision, no 409
+      expect(repeatedResponse.toolExecutions.length).toBe(0);
+      expect(repeatedResponse.applicationSummary).toBeNull(); // Still NO pending confirmation card
+      expect(repeatedResponse.submittedApplication).toBeDefined();
+      expect(repeatedResponse.submittedApplication?.applicationNumber).toBe(submittedAppNumber);
+      expect(repeatedResponse.submittedApplication?.status).toBe("SUBMITTED");
+      expect(repeatedResponse.message).toContain(submittedAppNumber);
+      if (submittedAppId) {
+        expect(repeatedResponse.message).toContain(submittedAppId);
+      }
+      expect(repeatedResponse.message).toContain("SUBMITTED");
+      expect(repeatedResponse.message).not.toContain("Do you confirm and authorize");
+      expect(repeatedResponse.message).not.toContain("Please review your gold loan application summary");
+
+      // Step 3: Verify end-to-end via HTTP POST /api/v1/assistant/chat
+      const httpRes = await request(app)
+        .post("/api/v1/assistant/chat")
+        .send({
+          messages: [
+            {
+              role: "assistant",
+              content: firstResponse.message
+            },
+            {
+              role: "user",
+              content: "Yes, I confirm and authorize this gold loan application."
+            }
+          ]
+        });
+
+      expect(httpRes.status).toBe(200);
+      expect(httpRes.body.success).toBe(true);
+      expect(httpRes.body.data.applicationSummary).toBeNull();
+      expect(httpRes.body.data.submittedApplication).toBeDefined();
+      expect(httpRes.body.data.submittedApplication.applicationNumber).toBe(submittedAppNumber);
+      expect(httpRes.body.data.submittedApplication.status).toBe("SUBMITTED");
+      expect(httpRes.body.data.message).toContain(submittedAppNumber);
+      expect(httpRes.body.data.message).not.toContain("Do you confirm");
+    });
   });
 });
 

@@ -64,24 +64,30 @@ CRITICAL OPERATIONAL RULES & GUARDRAILS:
      * When a quote is calculated, you may also output a \`\`\`quote-summary JSON block containing grossWeightGrams, netWeightGrams, karat, pureGoldGrams, goldValue, and schemes.
 
 5. MANDATORY EXPLICIT CONFIRMATION BEFORE SUBMISSION:
-   - ONLY when ALL 6 required application details are collected:
-     Present the complete Application Summary formatted using the \`\`\`application-summary JSON block:
-     \`\`\`application-summary
-     {
-       "fullName": "Full Legal Name",
-       "maskedMobileNumber": "9876XXXX10",
-       "grossWeightGrams": 50,
-       "netWeightGrams": 45,
-       "karat": 22,
-       "schemeName": "Bullet Repayment",
-       "annualInterestRate": 12,
-       "tenureMonths": 12,
-       "eligibleLoan": 202125
-     }
-     \`\`\`
-   - After presenting the summary, explicitly ask:
-     "Do you confirm and authorize this gold loan application? (Yes/No)"
-   - ONLY call "submit_application" with "userConfirmed: true" after the user explicitly and affirmatively confirms (e.g., "yes", "confirm", "proceed", "I confirm").
+   - When ALL 6 required application details are collected AND the application has NOT been submitted yet:
+     * If the user has NOT yet explicitly confirmed:
+       Present the complete Application Summary formatted using the \`\`\`application-summary JSON block:
+       \`\`\`application-summary
+       {
+         "fullName": "Full Legal Name",
+         "maskedMobileNumber": "9876XXXX10",
+         "grossWeightGrams": 50,
+         "netWeightGrams": 45,
+         "karat": 22,
+         "schemeName": "Bullet Repayment",
+         "annualInterestRate": 12,
+         "tenureMonths": 12,
+         "eligibleLoan": 202125
+       }
+       \`\`\`
+       After presenting the summary, explicitly ask:
+       "Do you confirm and authorize this gold loan application? (Yes/No)"
+       Wait for the user's explicit response.
+     * When the user explicitly and affirmatively confirms (e.g., "yes", "confirm", "proceed", "I confirm", "Yes, I confirm and authorize this gold loan application"):
+       1. Immediately invoke "submit_application" with "userConfirmed: true".
+       2. Do NOT output the \`\`\`application-summary JSON block.
+       3. Do NOT ask for confirmation again.
+       4. State that the application is officially submitted and present the Application Reference Details (Application Number, Application ID, and Status: SUBMITTED).
    - If the user says "no", "cancel", "wait", or asks to modify details, do NOT submit.
 
 6. POST-SUBMISSION STATE & REFERENCE DETAILS:
@@ -94,7 +100,8 @@ CRITICAL OPERATIONAL RULES & GUARDRAILS:
      * You MUST NEVER ask for confirmation again.
      * You MUST NEVER output the \`\`\`application-summary JSON block after submission has succeeded.
      * You MUST NEVER call "submit_application" again for this customer.
-     * If the user asks about the submitted application afterward (e.g. status, reference, or modification queries), explain that it has already been submitted and provide its reference details (Application Number, Application ID, and SUBMITTED status).
+     * You MUST NEVER re-process confirmation requests or re-prompt for confirmation for an application that is already SUBMITTED.
+     * If the user sends confirmation messages again (e.g. "Yes", "I confirm", "Yes, I confirm and authorize this gold loan application") or asks about the submitted application, confirm that it has already been submitted, provide its reference details (Application Number, Application ID, and SUBMITTED status), and inform them that our branch credit officer will contact them.
 
 7. DUPLICATE APPLICATION HANDLING:
    - If "submit_application" returns a DUPLICATE_APPLICATION error, politely inform the user that an active application already exists for this mobile number within the last 7 days under RBI compliance rules. Provide the existing application ID and advise them that duplicate applications within 7 days cannot be created. Do NOT automatically retry.
@@ -637,6 +644,15 @@ export function extractChatSummaries(
         ? String((app.scheme as { name: string }).name)
         : (app.schemeName ? String(app.schemeName) : undefined)
     };
+  } else if (priorSubmission?.applicationNumber) {
+    submittedApplication = {
+      id: priorSubmission.id || "",
+      applicationNumber: priorSubmission.applicationNumber,
+      status: "SUBMITTED",
+      fullName: "",
+      maskedMobileNumber: "",
+      eligibleLoan: 0
+    };
   }
 
   // If application was just submitted or was already submitted in this conversation, NEVER return applicationSummary
@@ -650,18 +666,26 @@ export function extractChatSummaries(
   // Clean raw Markdown pipe tables so raw pipes are never presented as unformatted text
   let finalMessage = stripMarkdownTables(msgAfterQuote);
 
-  // If submitted, strip any leftover confirmation prompt from finalMessage
+  // If submitted, strip any leftover confirmation prompt, question, or summary lead-in from finalMessage
   if (isSubmitted) {
     finalMessage = finalMessage
+      .replace(/```application-summary[\s\S]*?```/gi, "")
+      .replace(/(?:Please\s+)?(?:review|check)\s+(?:your\s+)?(?:gold\s+loan\s+)?(?:application\s+)?(?:summary|details)(?:\s+below)?[:.]?/gi, "")
+      .replace(/(?:Here\s+is\s+your\s+)?(?:gold\s+loan\s+)?application\s+summary[:.]?/gi, "")
       .replace(/Do you confirm and authorize this gold loan application\?\s*\(Yes\/No\)/gi, "")
-      .replace(/Please confirm:?\s*Do you wish to submit.*?\(Yes\/No\)/gi, "")
-      .replace(/Do you wish to submit.*?\(Yes\/No\)/gi, "")
+      .replace(/(?:Do\s+you\s+confirm|Please\s+confirm)[^.\n]*?\??(?:\s*\(Yes\/No\))?/gi, "")
+      .replace(/(?:Do\s+you\s+wish\s+to\s+submit|Would\s+you\s+like\s+to\s+proceed)[^.\n]*?\??/gi, "")
+      .replace(/(?:Do\s+you\s+authorize)[^.\n]*?\??/gi, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
   }
 
-  // If newly submitted, ensure Application ID, Application Number, and status SUBMITTED are clearly present
-  if (submittedApplication) {
+  // If newly submitted or submittedApplication present, ensure Application ID, Application Number, and status SUBMITTED are clearly present
+  if (submittedApplication && (submitTool || priorSubmission)) {
+    if (!finalMessage) {
+      finalMessage = `Your gold loan application has been successfully submitted under Application Number ${submittedApplication.applicationNumber} (Status: SUBMITTED).`;
+    }
+
     const hasAppNum = finalMessage.includes(submittedApplication.applicationNumber);
     const hasAppId = submittedApplication.id ? finalMessage.includes(submittedApplication.id) : true;
     const hasStatus = finalMessage.includes("SUBMITTED");
@@ -723,11 +747,37 @@ export async function chatWithAssistant(
       if (appNumMatch && appNumMatch[1]) {
         priorAppNumber = appNumMatch[1];
       }
-      const appIdMatch = m.content.match(/Application ID:\s*([a-zA-Z0-9-]+)/i);
+      const appIdMatch = m.content.match(/Application ID[\s:*]+([a-zA-Z0-9-]+)/i);
       if (appIdMatch && appIdMatch[1]) {
         priorAppId = appIdMatch[1];
       }
     }
+  }
+
+  // Detect explicit user confirmation messages
+  const lastUserMsg = [...conversationMessages].reverse().find((m) => m.role === "user");
+  const isExplicitAuthorize =
+    !!lastUserMsg &&
+    /^(yes,?\s*)?(i\s+)?confirm\s+and\s+authorize|^yes\.?$|^confirm\.?$/i.test(
+      lastUserMsg.content.trim()
+    );
+
+  // If application was already submitted and user sends confirmation text again, return immediately
+  if (priorAppNumber && isExplicitAuthorize) {
+    return {
+      message: `Your gold loan application has already been successfully submitted under Application Number ${priorAppNumber} (Status: SUBMITTED).\n\n**Application Reference Details:**\n- **Application Number:** ${priorAppNumber}${priorAppId ? `\n- **Application ID:** ${priorAppId}` : ""}\n- **Status:** SUBMITTED\n\nOur branch credit officer will contact you shortly to complete KYC verification and physical gold assay. No further confirmation or action is required.`,
+      toolExecutions: [],
+      applicationSummary: null,
+      quoteSummary: null,
+      submittedApplication: {
+        id: priorAppId || "",
+        applicationNumber: priorAppNumber,
+        status: "SUBMITTED",
+        fullName: "",
+        maskedMobileNumber: "",
+        eligibleLoan: 0
+      }
+    };
   }
 
   // Build full message thread with system prompt
@@ -743,6 +793,12 @@ export async function chatWithAssistant(
     messages.push({
       role: "system",
       content: `IMPORTANT CONTEXT: An application has ALREADY been submitted in this conversation with Application Number: ${priorAppNumber}${priorAppId ? `, Application ID: ${priorAppId}` : ""}, Status: SUBMITTED. You MUST NOT call submit_application again. You MUST NOT display an application-summary card or ask for confirmation again. If the customer asks about their application, changes, or status, explain that it has already been submitted and provide its reference details.`
+    });
+  } else if (isExplicitAuthorize) {
+    messages.push({
+      role: "system",
+      content:
+        "DIRECTIVE: The user has affirmatively confirmed and authorized this application. Call `submit_application` with userConfirmed: true immediately. Do NOT ask for confirmation again. Do NOT output an ```application-summary JSON block. Output ONLY the final submission confirmation message with Application Number, Application ID, and Status: SUBMITTED."
     });
   }
 
@@ -804,14 +860,30 @@ export async function chatWithAssistant(
         }
 
         let toolResult: unknown;
-        if (tc.function.name === "submit_application" && priorAppNumber) {
+        const alreadySubmittedThisRun = executedTools.some(
+          (t) => t.toolName === "submit_application" && (t.result as { success?: boolean })?.success
+        );
+
+        if (tc.function.name === "submit_application" && (priorAppNumber || alreadySubmittedThisRun)) {
+          const appNum =
+            priorAppNumber ||
+            (executedTools.find((t) => t.toolName === "submit_application")?.result as {
+              application?: { applicationNumber?: string; id?: string };
+            })?.application?.applicationNumber ||
+            "ALD-SUBMITTED";
+          const appId =
+            priorAppId ||
+            (executedTools.find((t) => t.toolName === "submit_application")?.result as {
+              application?: { applicationNumber?: string; id?: string };
+            })?.application?.id;
+
           // Prevent repeated submission if application was already submitted in this conversation
           toolResult = {
             success: false,
             error: "ALREADY_SUBMITTED",
-            applicationNumber: priorAppNumber,
-            applicationId: priorAppId ?? undefined,
-            message: `This application was already successfully submitted in this conversation (Application Number: ${priorAppNumber}, Status: SUBMITTED). Do not submit again.`
+            applicationNumber: appNum,
+            applicationId: appId ?? undefined,
+            message: `This application was already successfully submitted in this conversation (Application Number: ${appNum}, Status: SUBMITTED). Do not submit again.`
           };
         } else {
           toolResult = await executeTool(tc.function.name, parsedArgs);

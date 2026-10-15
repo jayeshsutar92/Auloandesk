@@ -87,10 +87,45 @@ function extractClientApplicationSummary(content: string): ApplicationSummaryDat
   return null;
 }
 
-function cleanContentText(content: string): string {
+function cleanContentText(content: string, isSubmitted = false): string {
   if (!content) return "";
   const tableRegex = /\|[^\n]+\|[^\n]+\|(?:\r?\n\|[-:\s|]+\|)?(?:\r?\n\|[^\n]+\|[^\n]+\|)+/g;
-  return content.replace(tableRegex, "").replace(/\n{3,}/g, "\n\n").trim();
+  let text = content.replace(tableRegex, "");
+  if (isSubmitted) {
+    text = text
+      .replace(/```application-summary[\s\S]*?```/gi, "")
+      .replace(/(?:Please\s+)?(?:review|check)\s+(?:your\s+)?(?:gold\s+loan\s+)?(?:application\s+)?(?:summary|details)(?:\s+below)?[:.]?/gi, "")
+      .replace(/(?:Here\s+is\s+your\s+)?(?:gold\s+loan\s+)?application\s+summary[:.]?/gi, "")
+      .replace(/Do you confirm and authorize this gold loan application\?\s*\(Yes\/No\)/gi, "")
+      .replace(/(?:Do\s+you\s+confirm|Please\s+confirm)[^.\n]*?\??(?:\s*\(Yes\/No\))?/gi, "")
+      .replace(/(?:Do\s+you\s+wish\s+to\s+submit|Would\s+you\s+like\s+to\s+proceed)[^.\n]*?\??/gi, "")
+      .replace(/(?:Do\s+you\s+authorize)[^.\n]*?\??/gi, "");
+  }
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function findSubmittedApplication(messages: DisplayMessage[]): SubmittedApplicationData | null {
+  for (const m of messages) {
+    if (m.submittedApplication) {
+      return m.submittedApplication;
+    }
+    if (m.role === "assistant") {
+      const numMatch = m.content.match(/\b(ALD-\d+-\d+)\b/);
+      const hasSubmitted = m.content.includes("SUBMITTED");
+      if (numMatch && hasSubmitted) {
+        const idMatch = m.content.match(/Application ID[\s:*]+([a-zA-Z0-9-]+)/i);
+        return {
+          id: idMatch ? idMatch[1] : "",
+          applicationNumber: numMatch[1],
+          status: "SUBMITTED",
+          fullName: "",
+          maskedMobileNumber: "",
+          eligibleLoan: 0
+        };
+      }
+    }
+  }
+  return null;
 }
 
 export const AiAssistantChat: React.FC = () => {
@@ -109,6 +144,10 @@ export const AiAssistantChat: React.FC = () => {
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const idCounter = React.useRef<number>(0);
 
+  // Check if an application has already been successfully submitted anywhere in this conversation
+  const conversationSubmittedApp = findSubmittedApplication(messages);
+  const isConversationSubmitted = !!conversationSubmittedApp;
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -125,6 +164,31 @@ export const AiAssistantChat: React.FC = () => {
 
     let sourceMessages = baseMessages || messages;
     const lowerText = text.toLowerCase();
+    const isConfirmationText =
+      lowerText.includes("confirm") ||
+      lowerText.includes("authorize") ||
+      lowerText === "yes" ||
+      lowerText === "yes, i confirm";
+
+    // If application has already been submitted in this conversation and user sends confirmation text again:
+    if (isConversationSubmitted && isConfirmationText && conversationSubmittedApp) {
+      idCounter.current += 1;
+      const userMessage: DisplayMessage = {
+        id: `user-${idCounter.current}`,
+        role: "user",
+        content: text
+      };
+      idCounter.current += 1;
+      const assistantMessage: DisplayMessage = {
+        id: `assistant-${idCounter.current}`,
+        role: "assistant",
+        content: `Your gold loan application has already been submitted and registered under Application Number **${conversationSubmittedApp.applicationNumber}** (Status: **${conversationSubmittedApp.status}**).\n\nNo further confirmation is needed. Our branch credit officer will contact you shortly to complete KYC verification and physical gold assay.`,
+        submittedApplication: conversationSubmittedApp
+      };
+      setMessages((prev) => [...prev, userMessage, assistantMessage]);
+      setInput("");
+      return;
+    }
 
     // If user explicitly sent text matching yes/no, update any pending confirmation card in sourceMessages
     if (lowerText.includes("yes") || lowerText.includes("confirm") || lowerText.includes("proceed")) {
@@ -206,6 +270,7 @@ export const AiAssistantChat: React.FC = () => {
   };
 
   const handleConfirmCard = (messageId: string) => {
+    if (isConversationSubmitted) return;
     const updated = messages.map((m) =>
       m.id === messageId ? { ...m, confirmationStatus: "confirmed" as const } : m
     );
@@ -214,6 +279,7 @@ export const AiAssistantChat: React.FC = () => {
   };
 
   const handleCancelCard = (messageId: string) => {
+    if (isConversationSubmitted) return;
     const updated = messages.map((m) =>
       m.id === messageId ? { ...m, confirmationStatus: "cancelled" as const } : m
     );
@@ -319,8 +385,11 @@ export const AiAssistantChat: React.FC = () => {
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
             {messages.map((m) => {
               const isUser = m.role === "user";
-              const summary = !m.submittedApplication && (m.applicationSummary || (!isUser ? extractClientApplicationSummary(m.content) : null));
-              const displayContent = cleanContentText(m.content);
+              const summary =
+                !isConversationSubmitted &&
+                !m.submittedApplication &&
+                (m.applicationSummary || (!isUser ? extractClientApplicationSummary(m.content) : null));
+              const displayContent = cleanContentText(m.content, isConversationSubmitted);
 
               return (
                 <div
